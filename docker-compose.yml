@@ -1,0 +1,5 @@
+services:
+  app:
+    build: .
+    container_name: synapseshop_app
+    restart: unless-stopped
