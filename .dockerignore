@@ -1,0 +1,47 @@
+# ------------------------------------------------------------------
+# .dockerignore — reduz o build context e preserva o cache de camadas
+# (arquivos ignorados não invalidam o COPY do código).
+# ------------------------------------------------------------------
+
+# VCS
+.git
+.github
+
+# Dependências locais (inclusive o node_modules do .opencode, que é grande)
+node_modules
+.opencode/node_modules
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Config local / segredos (nunca entram na imagem)
+.env
+.env.*
+*.pem
+*.key
+
+# Ferramentas / IDE
+.vscode/
+.idea/
+
+# Artefatos não necessários no container
+SpecDD.jpg
+*.log
+Thumbs.db
+.DS_Store
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.override.yml

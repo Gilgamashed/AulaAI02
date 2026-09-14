@@ -62,7 +62,49 @@ Docker, Django REST Framework, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis.
 
 ## Como subir o ambiente
 
-Documentado incrementalmente conforme as aulas (ver Aula 2 — Conteinerização).
+Infraestrutura conteinerizada com Docker Compose (Aula 2/3). O ambiente é
+composto por dois serviços:
+
+| Serviço | Imagem            | Função                                               |
+| ------- | ----------------- | ---------------------------------------------------- |
+| `api`   | build do Dockerfile | API header de disponibilidade na rota `/health` (porta 8000) |
+| `db`    | `postgres:16-alpine` | Banco PostgreSQL (volume `pgdata` para persistência) |
+
+### Pré-requisitos
+
+- Docker Desktop (com WSL2) e Docker Compose.
+- Arquivo `.env` na raiz com as credenciais do banco (usar `.env.example`
+  como referência). O Compose o carrega automaticamente.
+
+### Subir o ambiente
+
+```bash
+docker compose up -d --build
+```
+
+O serviço `api` só inicia depois que o banco responde com sucesso ao
+`healthcheck` (`depends_on` + `service_healthy`).
+
+### Validar a disponibilidade
+
+```bash
+curl http://localhost:8000/health
+# {"status": "ok", "service": "synapseshop-api"}
+```
+
+### Acompanhar os logs
+
+```bash
+docker compose logs -f api      # logs do serviço API
+docker compose logs -f db       # logs do PostgreSQL (ex.: "database system is ready")
+```
+
+### Derrubar o ambiente
+
+```bash
+docker compose down             # encerra os containers (mantém o volume pgdata)
+docker compose down -v          # encerra e apaga o volume (atenção: apaga os dados)
+```
 
 ## Referências
 
