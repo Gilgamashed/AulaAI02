@@ -70,6 +70,12 @@ composto por dois serviços:
 | `api`   | build do Dockerfile | API header de disponibilidade na rota `/health` (porta 8000) |
 | `db`    | `postgres:16-alpine` | Banco PostgreSQL (volume `pgdata` para persistência) |
 
+O `Dockerfile` usa **multistage build** (`builder` prepara as dependências;
+`runtime` copia apenas o necessário) com cache eficiente de dependências e
+execução via usuário não-root `appuser`. O serviço `api` só inicia depois que
+o banco responde com sucesso ao `healthcheck` (`depends_on` +
+`service_healthy`).
+
 ### Pré-requisitos
 
 - Docker Desktop (com WSL2) e Docker Compose.
@@ -81,9 +87,6 @@ composto por dois serviços:
 ```bash
 docker compose up -d --build
 ```
-
-O serviço `api` só inicia depois que o banco responde com sucesso ao
-`healthcheck` (`depends_on` + `service_healthy`).
 
 ### Validar a disponibilidade
 

@@ -95,3 +95,26 @@ executada (registrar apenas usos reais durante o desenvolvimento).
   http://localhost:8000/health` (200) e análise dos logs de inicialização.
 - **Revisão humana:** escopo do `/health` limitado a "ok" (sem checagem de
   banco nesta fase); commit local sem push nesta etapa.
+
+## [2026-09-14] Aula 3 — Multistage build (fechamento do DoD)
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Verificação do item 4 (Definition of Done) da spec da Aula 3 —
+  identificado o pendente "o `Dockerfile` implementa multistage build".
+- **Prompt:** "seguindo as diretrizes da specs/specs_da_aula_3.md, vamos
+  verificar se tudo está feito conforme o que está sendo pedido no item 4
+  Requisitos de Entrega (Definition of Done). O banco de dados que usamos é
+  complexo ou microserviço?"
+- **Resultado/Decisão:** checklist do DoD: 7/8 já atendidos (não-root,
+  compose API+DB, `/health`, PROMPTS, README, up único, escopo isolado).
+  Esclarecido que o `postgres:16-alpine` **não** é banco complexo nem
+  microserviço (é serviço de infraestrutura, sem código de aplicação — o item
+  8 segue atendido). **Correção aplicada:** Dockerfile migrado de estágio
+  único para **multistage build** — estágio `builder` (`pip install
+  --prefix=/install` com cache mount) e estágio `runtime` (`COPY --from=builder`,
+  usuário não-root, código por último). Imagem final menor: 188 MB vs 205 MB
+  da versão de estágio único; cache de camadas e cache mount preservados.
+  Validado com `docker compose up`, `curl /health` (200) e `ps` (api e db
+  healthy).
+- **Revisão humana:** multistage adotado pela squad; nova rodada de validação
+  sem regressões (runtime como `appuser`/uid 1000 confirmado).
