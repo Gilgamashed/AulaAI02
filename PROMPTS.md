@@ -20,6 +20,84 @@ adicione uma entrada com o formato abaixo em ordem cronológica.
 Histórico de uso de IA da equipe — complete conforme a metodologia SpecDD for
 executada (registrar apenas usos reais durante o desenvolvimento).
 
+## [2026-09-16] Aula 4 — Auditoria IA-safe e endurecimento de validações
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Revisão dos arquivos não commitados contra o checklist
+  `IA-SAFE.md` (item 4 — "Validações e payload") antes do commit.
+- **Prompt:** "Verifique se os arquivos de código não comitados se enquadram
+  nas diretrizes de @IA-SAFE.md." (auditoria) e "vamos aplicar os
+  aprimoramentos opcionais do item 4."
+- **Resultado/Decisão:** auditoria concluída com **conformidade** em todas as 7
+  seções (escopo sem JWT/Redis/FastAPI/filas; imports usados; tipagem
+  adequada; status 200/201/204/400/404 via DRF; segredos via env; operação
+  validada no container). Aprimoramentos do item 4 aplicados em
+  `api/core/serializers.py`: `_strip_required` (nome/marca/modelo sem espaços
+  em branco) e `validate_specifications` exigindo objeto JSON (`dict`).
+- **Revisão humana/ajuste manual:** confirmado que o DRF já trima whitespace
+  por padrão (`trim_whitespace=True`), então `_strip_required` atua como defesa
+  explícita (não como correção de falha real). Testado no container: POST com
+  trim → 201, brand/name só espaços → 400, specifications lista → 400, nome de
+  categoria duplicado → 400 (`UniqueValidator` automático), preço negativo →
+  400 (sem regressão). README atualizado com as novas validações.
+
+## [2026-09-16] Aula 4 — Decisões de arquitetura da API DRF
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Spec da Aula 4 — antes de implementar, alinhar banco de dados,
+  servidor WSGI e formato da coleção de rotas.
+- **Prompt:** "Levando o spec da Aula 4 em consideração, vamos implementar a
+  estrutura inicial da API principal usando Django REST Framework. Antes de
+  fechar o plano, preciso alinhar: banco (PostgreSQL do compose ou SQLite),
+  servidor (runserver ou gunicorn) e formato da coleção (Postman ou Insomnia).
+  E, sendo uma loja de produtos eletrônicos, os models devem ser adaptados."
+- **Resultado/Decisão:** squad optou por PostgreSQL via compose (reaproveita a
+  `DATABASE_URL` da Aula 3), gunicorn com `migrate` no startup e coleção
+  Postman. Models adaptados ao domínio de eletrônicos: `brand`, `model`, `sku`
+  único, `price` (DecimalField), `specifications` (JSONField), `warranty_months`
+  (PositiveIntegerField) e FK `category` (CASCADE).
+- **Revisão humana:** planos de campos e decisões aprovados antes do código.
+
+## [2026-09-16] Aula 4 — Implementação do CRUD (models, serializers, viewsets)
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Spec da Aula 4 — criar `Category` e `Item` com Models,
+  Serializers e ModelViewSets, rotas em `/api/v1/` via `DefaultRouter` e
+  migração inicial.
+- **Prompt:** "Implemente a estrutura inicial da API DRF seguindo o plano
+  aprovado: projeto Django em `api/config`, app `core`, serializers com
+  validações customizadas (preço não-negativo, SKU, nome não-vazio), viewsets e
+  router; healthcheck `/health` preservado no compose."
+- **Resultado/Decisão:** criados `api/manage.py`, `api/config/`
+  (settings/urls/wsgi/asgi), app `core`, `requirements.txt` com Django 5.2,
+  DRF, dj-database-url, psycopg e gunicorn; Dockerfile passou a executar
+  `migrate --noinput` + gunicorn; `.env.example`/compose ganharam
+  `DJANGO_SECRET_KEY` e `DJANGO_DEBUG`; removido `api/main.py` (servidor stdlib
+  da Aula 3).
+- **Revisão humana/ajuste manual:** primeiro boot falhou com
+  `ModuleNotFoundError: No module named 'config'` (o worker do gunicorn não
+  tinha `api/` no `sys.path`). Corrigido manualmente com
+  `sys.path.insert(0, ...)` em `api/config/wsgi.py` e `asgi.py`. Checklist
+  IA-safe aplicado: sem imports de JWT/Redis/FastAPI/mensageria, tipos
+  adequados e validações antes de persistir.
+
+## [2026-09-16] Aula 4 — Validação, checklist IA-safe e documentação
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** DoD da Aula 4 — testar rotas via requisições (Postman/curl),
+  criar o checklist no repositório, exportar coleção e documentar.
+- **Prompt:** "Valide a matriz de status HTTP do DoD (200/201/204/400/404) via
+  curl no ambiente conteinerizado e documente no README e PROMPTS."
+- **Resultado/Decisão:** criado `IA-SAFE.md`, `collections/
+  synapseshop_aula4.postman_collection.json` e seção "Rotas da API (Aula 4)" no
+  README. Validação com `curl` (corpos via arquivo no PowerShell):
+  POST 201, GET 200, PATCH 200, DELETE 204 (e 404 no re-GET), 400 para preço
+  negativo, SKU malformado, pk inválida, SKU duplicado e nome vazio; `/health`
+  200; cascade em DELETE de categoria confirmado.
+- **Revisão humana:** nota do PowerShell 5.1 quebrando aspas de JSON no `curl`
+  (contorno com `--data-binary @arquivo`); pendente validação da squad e do
+  commit/push.
+
 ## [2026-09-14] Aula 3 — Dockerfile com runtime, usuário não-root e cache
 
 - **Ferramenta:** opencode (opencode/big-pickle)

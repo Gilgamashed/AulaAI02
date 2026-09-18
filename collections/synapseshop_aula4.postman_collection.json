@@ -1,0 +1,304 @@
+{
+  "info": {
+    "_postman_id": "6a7f3ce7-5386-4d70-9a2a-2d4c0b7e1a41",
+    "name": "SynapseShop - Aula 4 (CRUD DRF)",
+    "description": "Rotas CRUD da API principal (Django REST Framework) sob /api/v1/. Produtos eletrônicos: categories e items. Variável base_url=http://localhost:8000.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Healthcheck",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Disponibilidade da API. Esperado: 200 ok."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "Listar categorias",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", ""]
+            },
+            "description": "GET list. Esperado: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar categoria",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Smartphones\",\n  \"description\": \"Dispositivos móveis e acessórios.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", ""]
+            },
+            "description": "POST. Esperado: 201 Created. O slug é gerado automaticamente."
+          },
+          "response": []
+        },
+        {
+          "name": "Obter categoria por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "1", ""]
+            },
+            "description": "GET detail. Esperado: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Categoria inexistente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/999999/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "999999", ""]
+            },
+            "description": "GET detail inexistente. Esperado: 404 Not Found."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar categoria (PUT)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Smartphones e Tablets\",\n  \"description\": \"Dispositivos móveis, tablets e acessórios.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "1", ""]
+            },
+            "description": "PUT completo. Esperado: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar categoria (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Somente a descrição é alterada.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "1", ""]
+            },
+            "description": "PATCH parcial. Esperado: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Excluir categoria",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "1", ""]
+            },
+            "description": "DELETE. Esperado: 204 No Content. (CASCADE remove os itens da categoria.)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Items",
+      "item": [
+        {
+          "name": "Listar produtos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            },
+            "description": "GET list. Esperado: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar produto eletrônico",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"iPhone 15 128GB\",\n  \"brand\": \"Apple\",\n  \"model\": \"A3090\",\n  \"sku\": \"APL-IP15-128\",\n  \"description\": \"Smartphone 6.1 pol., câmera 48MP.\",\n  \"price\": 5499.90,\n  \"specifications\": { \"color\": \"preto\", \"ram\": \"8GB\", \"screen\": \"6.1\" },\n  \"warranty_months\": 12,\n  \"category\": 1,\n  \"is_active\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            },
+            "description": "POST. Esperado: 201 Created. Use o id da categoria criada anteriormente."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar produto inválido (preço negativo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Produto Inválido\",\n  \"brand\": \"X\",\n  \"model\": \"Y\",\n  \"sku\": \"XX-000\",\n  \"price\": -10.00,\n  \"category\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            },
+            "description": "POST com preço negativo. Esperado: 400 Bad Request (validação customizada)."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar produto inválido (SKU malformado)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Produto Inválido\",\n  \"brand\": \"X\",\n  \"model\": \"Y\",\n  \"sku\": \"sku-errado!\",\n  \"price\": 100.00,\n  \"category\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            },
+            "description": "POST com SKU fora do formato 'XXXX-AAAA-BBBB'. Esperado: 400."
+          },
+          "response": []
+        },
+        {
+          "name": "Obter produto por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "1", ""]
+            },
+            "description": "GET detail. Esperado: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Produto inexistente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/999999/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "999999", ""]
+            },
+            "description": "GET detail inexistente. Esperado: 404."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar produto (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 5999.90\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "1", ""]
+            },
+            "description": "PATCH parcial. Esperado: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Excluir produto",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "1", ""]
+            },
+            "description": "DELETE. Esperado: 204 No Content."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    }
+  ]
+}
