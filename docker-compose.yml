@@ -11,6 +11,8 @@ services:
     environment:
       # Variável mínima injetada: a API localiza o banco pelo nome do serviço 'db'
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-synapseshop-key}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s

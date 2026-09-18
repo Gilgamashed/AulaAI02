@@ -72,5 +72,6 @@ USER appuser
 EXPOSE 8000
 
 # --- ENTRYPOINT DA API ------------------------------------------------
-# Servidor HTTP (somente stdlib, sem framework nesta fase) com /health.
-CMD ["python", "-u", "api/main.py"]
+# Aplica as migrações do Django e sobe o WSGI (gunicorn) na porta 8000.
+# O banco já está saudável: o compose usa depends_on: db: service_healthy.
+CMD ["sh", "-c", "python api/manage.py migrate --noinput && gunicorn --bind 0.0.0.0:8000 api.config.wsgi:application"]

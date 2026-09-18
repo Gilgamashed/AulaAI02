@@ -1,4 +1,8 @@
 # Dependências de runtime do SynapseShop.
-# Mantido vazio nesta fase (Aula 2/3): nenhum framework ou biblioteca é
-# configurado antes das aulas de API/banco. Adicionar pacotes aqui conforme
-# o projeto evoluir (Django REST Framework, FastAPI, SQLAlchemy, etc.).
+# Aula 4: Django REST Framework integrado ao ambiente conteinerizado
+# (PostgreSQL via psycopg, WSGI via gunicorn).
+Django>=5.2,<6.0
+djangorestframework>=3.16,<4.0
+dj-database-url>=2.3,<3.0
+psycopg[binary]>=3.2,<4.0
+gunicorn>=23.0,<24.0
