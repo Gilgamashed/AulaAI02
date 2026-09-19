@@ -36,5 +36,20 @@ services:
       timeout: 5s
       retries: 5
 
+  inventory:
+    build: ./services/inventory
+    container_name: synapseshop_inventory
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    # Microsserviço de estoque (Aula 5): sem banco nesta fase — persistência
+    # em memória até a Aula 6. Por isso não há depends_on do serviço db.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   pgdata:

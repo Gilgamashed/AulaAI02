@@ -1,0 +1,6 @@
+# Dependências de runtime do microsserviço inventory (Aula 5).
+# FastAPI já traz o Pydantic v2; declaramos a faixa explicitamente porque os
+# modelos Pydantic são a camada de validação central deste scaffold.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+pydantic>=2.9,<3.0

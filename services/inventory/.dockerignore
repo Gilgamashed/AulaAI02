@@ -1,0 +1,14 @@
+# Reduz o build context do serviço (o build roda com context = services/inventory)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.env
+.env.*
+*.log
+Dockerfile
+.dockerignore
