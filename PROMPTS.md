@@ -20,6 +20,120 @@ adicione uma entrada com o formato abaixo em ordem cronológica.
 Histórico de uso de IA da equipe — complete conforme a metodologia SpecDD for
 executada (registrar apenas usos reais durante o desenvolvimento).
 
+## [2026-09-18] Aula 5 — PROMPTS-TEMPLATE.md e prompts do inventory (itens 2 + 6)
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Spec da Aula 5 — alinhamento dos itens 2 (elaborar prompts que
+  descrevam explicitamente modelos Pydantic, dependências e respostas padrão) e
+  6 (criar e versionar `PROMPTS-TEMPLATE.md` para padronizar descrição de
+  requisitos, restrições e formatos de saída ao acionar ferramentas de IA).
+- **Prompt:** "vamos replanejar tudo. Nesta etapa, vamos alinhar o item 2 com o
+  item 6. Vamos elaborar os prompts que descrevam os modelos Pydantic,
+  dependências e respostas padrão e vamos criar e versionar o
+  PROMPTS-TEMPLATE.md." Decisões alinhadas via perguntas: exemplo preenchido
+  dentro do próprio template; prompts descrevendo o domínio real (SKU + 
+  quantity/reserved/reorder_level e CRUD completo); matriz de status com **400**
+  para payload inválido (padronizando com o IA-SAFE).
+- **Resultado/Decisão:** criado `PROMPTS-TEMPLATE.md` na raiz, com duas partes:
+  **Parte A** — template genérico reutilizável (Contexto → Objetivo → Requisitos
+  técnicos → Modelos Pydantic → Dependências → Respostas padrão e matriz de
+  status → Restrições SpecDD → Formato de saída → Critérios de aceite) com link
+  ao IA-SAFE.md; **Parte B** — exemplo preenchido do microsserviço inventory
+  (Aula 5), descrevendo o domínio real (pattern de SKU `XXXX-AAAA-BBBB`,
+  `quantity`/`reserved`/`reorder_level` com `ge=0`), a dependência `ServiceInfo`
+  via `Depends`, o envelope `ApiResponse[T]` com `ok()`/`error()` e a matriz de
+  status (200/201/204/400/404/409).
+- **Revisão humana/ajuste manual:** decisão de padronizar **400** (e não 422)
+  para payload inválido exige handler customizado de `RequestValidationError`
+  no FastAPI — registrado como pendente do item 4 nos critérios de aceite do
+  template. Template versionado na raiz; uso registrado neste módulo.
+
+## [2026-09-18] Aula 5 — Coleção Postman do microsserviço inventory
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Aula 5 — gerar a coleção de testes das rotas do microsserviço de
+  estoque, espelhando o padrão da coleção da Aula 4.
+- **Prompt:** "podemos fazer uma collections com as novas rotas da aula 5?"
+  Decisões alinhadas: manter endpoints de documentação (`/docs`, `/openapi.json`)
+  **fora** da coleção (mesmo padrão da Aula 4) e registrar a referência no
+  README e o uso no PROMPTS.
+- **Resultado/Decisão:** criada `collections/synapseshop_aula5.postman_collection.json`
+  (Postman v2.1.0, `base_url=http://localhost:8001`, UUID próprio) com pastas
+  **Core** (`GET /` e `GET /health`) e **Inventory** (CRUD completo em
+  `/api/v1/inventory`): GET list 200, POST criar 201, duplicado 409, SKU inválido
+  400, quantity negativa 400, GET por SKU 200, inexistente 404, path malformado
+  400, PATCH parcial 200, PATCH vazio 400, DELETE 204 e GET pós-exclusão 404.
+  README atualizado (seção do inventory) com a referência à coleção.
+- **Revisão humana/ajuste manual:** JSON validado (`ConvertFrom-Json`); nomes e
+  descrições em PT-BR com o status esperado em cada request. Pendente commit/push.
+
+## [2026-09-18] Aula 5 — Rotas mínimas, handlers 400 e integração ao compose (itens 3, 4 e 5)
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Spec da Aula 5 — executar os itens 3 (metodologia/qualidade
+  com tipagem validada via ruff/mypy), 4 (rotas mínimas e respostas padrão com
+  domínio real) e 5 (integração do inventory ao `docker-compose.yml`).
+- **Prompt:** "Qualquer refinamento que a gente venha a fazer... precisa ser
+  enxuto, direto ao ponto, senão não serve. Vamos executar os itens 3, 4 e 5 da
+  Aula 5." (execução após alinhamento prévio: CRUD completo, domínio real
+  SKU + quantity/reserved/reorder_level, **400** para payload inválido).
+- **Resultado/Decisão:**
+  - Item 3: `services/inventory/pyproject.toml` versionado (ruff: `line-length
+    100`, `py312`, selects `E/F/W/I/UP`; mypy: `disallow_untyped_defs`); ruff e
+    mypy passando em `app/` (corrigidos E501, W292 e UP046/UP047 — `ApiResponse`
+    migrado para type parameters PEP 695).
+  - Item 4: `app/handlers.py` com handler customizado de
+    `RequestValidationError` → **400** no envelope (padronização da squad) e de
+    `HTTPException` → status original no envelope; `app/schemas.py` reescrito no
+    domínio real (`SKU_PATTERN = ^[A-Z]{2,4}-[A-Z0-9-]+$` alinhado à Aula 4,
+    `InventoryItemCreate/Update/Item`); `app/routers/inventory.py` com CRUD
+    completo sob `/api/v1/inventory` (SKU do path validado com
+    `Path(pattern=...)`, PATCH com `exclude_unset` + 400 se payload vazio).
+  - Item 5: serviço `inventory` adicionado ao `docker-compose.yml` (build de
+    `./services/inventory`, porta `8001:8001`, healthcheck `urllib` em
+    `/health`, sem `depends_on` do `db` — sem banco nesta fase).
+  - Template: pattern de SKU da Parte B do `PROMPTS-TEMPLATE.md` corrigido para
+    o padrão real da Aula 4.
+- **Revisão humana/ajuste manual:** verificação do compose `config` pegou a
+  chave `inventory` fora do bloco `services:` (indentação) — corrigido e
+  revalidado. Validação no stack (`docker compose up -d --build`): matriz do
+  DoD no 8001 OK (GET 200, POST 201, duplicado 409, SKU inválido 400, quantity
+  negativa 400, GET 200, SKU de path inválido 400, SKU inexistente 404, PATCH
+  200, PATCH vazio 400, DELETE 204, GET pós-delete 404, `/docs` e
+  `/openapi.json` 200) e regressão do Django `/health` 200 na 8000; os três
+  serviços healthy. Nota: no `curl` do PowerShell 5.1 o JSON continua via
+  `--data-binary @arquivo` (padrão já registrado).
+
+## [2026-09-18] Aula 5 — Scaffold do microsserviço inventory em FastAPI
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Spec da Aula 5, item 1 de "Tarefas e Responsabilidades" — criar
+  o esqueleto (scaffold) do microsserviço complementar de estoque em FastAPI.
+- **Prompt:** "Estou começando uma nova aula, vamos seguir a
+  specs/specs_da_aula_5.md. Vamos começar seguindo apenas o primeiro item do
+  Tarefas e Responsabilidades — Criar o esqueleto do microsserviço FastAPI.
+  Sempre que for oportuno, faça comentários a respeito do que está sendo feito."
+  Decisões alinhadas via perguntas: diretório dentro de `services/`, Dockerfile
+  próprio já criado (integração ao compose só no item 5) e campos Pydantic
+  mínimos de exemplo (domínio real alinhado no item 4).
+- **Resultado/Decisão:** criado `services/inventory/` com `app/main.py`
+  (FastAPI app com `/docs`, `/openapi.json`, `/health`, `/` com dependência
+  injetada), `app/schemas.py` (modelos Pydantic de exemplo com validação:
+  `sku` não-vazio, `quantity >= 0`), `app/responses.py` (envelope padrão
+  `ApiResponse[T]` com factories `ok()`/`error()`), `app/dependencies.py`
+  (`ServiceInfo` via `Depends`), `app/routers/inventory.py` (rotas de exemplo
+  CRUD tipadas sob `/api/v1/inventory`), `requirements.txt` (fastapi, uvicorn,
+  pydantic v2) e `Dockerfile` próprio (multistage, usuário não-root, uvicorn na
+  porta 8001). Validação no container isolado: `/health` 200, `/docs` 200,
+  raiz 200, matriz de status POST 201 → 409 (SKU duplicado) → 422 (validação
+  Pydantic: sku vazio e quantity negativa), GET list/detail 200, DELETE 204 e
+  GET após delete 404.
+- **Revisão humana/ajuste manual:** adotado e respeitado o padrão do projeto
+  para JSON no `curl` do PowerShell 5.1 (`--data-binary @arquivo`, registrado
+  na Aula 4). Nota: o FastAPI devolve **422** (e não 400) para payloads
+  inválidos — comportamento padrão e idiomático do framework; a matriz 400 do
+  IA-SAFE será revisada quando as rotas-mínimas finais forem alinhadas (item 4).
+
 ## [2026-09-16] Aula 4 — Auditoria IA-safe e endurecimento de validações
 
 - **Ferramenta:** opencode (opencode/big-pickle)

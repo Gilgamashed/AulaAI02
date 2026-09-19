@@ -63,12 +63,13 @@ Docker, Django REST Framework, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis.
 ## Como subir o ambiente
 
 Infraestrutura conteinerizada com Docker Compose (Aula 2/3). O ambiente é
-composto por dois serviços:
+composto por três serviços:
 
-| Serviço | Imagem            | Função                                               |
-| ------- | ----------------- | ---------------------------------------------------- |
-| `api`   | build do Dockerfile | API Django REST Framework: `/health` + rotas CRUD em `/api/v1/` (porta 8000) |
-| `db`    | `postgres:16-alpine` | Banco PostgreSQL (volume `pgdata` para persistência) |
+| Serviço      | Imagem             | Função                                               |
+| ------------ | ------------------ | ---------------------------------------------------- |
+| `api`        | build do Dockerfile | API Django REST Framework: `/health` + rotas CRUD em `/api/v1/` (porta 8000) |
+| `db`         | `postgres:16-alpine` | Banco PostgreSQL (volume `pgdata` para persistência) |
+| `inventory`  | build de `services/inventory/Dockerfile` | Microsserviço FastAPI de estoque: `/health`, `/docs` e CRUD em `/api/v1/inventory` (porta 8001) |
 
 O `Dockerfile` usa **multistage build** (`builder` prepara as dependências;
 `runtime` copia apenas o necessário) com cache eficiente de dependências e
@@ -93,13 +94,16 @@ docker compose up -d --build
 ```bash
 curl http://localhost:8000/health
 # {"status": "ok", "service": "synapseshop-api"}
+curl http://localhost:8001/health
+# {"status": "ok", "service": "synapseshop-inventory"}
 ```
 
 ### Acompanhar os logs
 
 ```bash
-docker compose logs -f api      # logs do serviço API
-docker compose logs -f db       # logs do PostgreSQL (ex.: "database system is ready")
+docker compose logs -f api          # logs do serviço API
+docker compose logs -f db           # logs do PostgreSQL (ex.: "database system is ready")
+docker compose logs -f inventory    # logs do microsserviço de estoque
 ```
 
 ### Derrubar o ambiente
@@ -146,6 +150,44 @@ curl -X POST http://localhost:8000/api/v1/items/ \
 Coleção exportada para teste (importar no Postman e definir a variável
 `base_url` como `http://localhost:8000`):
 `collections/synapseshop_aula4.postman_collection.json`.
+
+## Microsserviço de estoque (Aula 5)
+
+Microsserviço complementar de inventário em **FastAPI** (`services/inventory/`),
+na porta **8001** (a 8000 é do Django). O domínio é o estoque real:
+`sku`, `name`, `quantity` (disponível), `reserved` e `reorder_level`. Sem banco
+nesta fase (persistência em memória; modelagem relacional é a Aula 6).
+
+| Rota                            | Verbos                  | Descrição                                      |
+| ------------------------------- | ----------------------- | ---------------------------------------------- |
+| `/`                             | GET                     | Metadados do serviço (name/version)            |
+| `/health`                       | GET                     | Healthcheck do serviço (200)                   |
+| `/docs`                          | GET                     | Swagger UI (OpenAPI)                           |
+| `/api/v1/inventory`             | GET, POST               | Listar / registrar item de estoque             |
+| `/api/v1/inventory/{sku}`       | GET, PATCH, DELETE      | Detalhe / atualizar parcial / excluir item     |
+
+Respostas no envelope padrão `{status, data, message}`. Status codes: **200**
+OK, **201** Created, **204** No Content, **400** Bad Request (payload ou path
+inválido — handler customizado, o padrão do FastAPI seria 422), **404** Not
+Found, **409** Conflict (SKU duplicado). O SKU segue o padrão `^[A-Z]{2,4}-[A-Z0-9-]+$`
+da Aula 4; `quantity`/`reserved`/`reorder_level` são `>= 0`; PATCH exige ao
+menos um campo.
+
+### Exemplo
+
+```bash
+curl -X POST http://localhost:8001/api/v1/inventory \
+  -H "Content-Type: application/json" \
+  -d '{"sku": "APL-IP15-128", "name": "iPhone 15 128GB",
+       "quantity": 10, "reserved": 0, "reorder_level": 5}'
+```
+
+Qualidade do serviço validada com `ruff` e `mypy` (config em
+`services/inventory/pyproject.toml`).
+
+Coleção exportada para teste (importar no Postman e definir a variável
+`base_url` como `http://localhost:8001`):
+`collections/synapseshop_aula5.postman_collection.json`.
 
 ## Referências
 

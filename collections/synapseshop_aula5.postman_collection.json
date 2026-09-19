@@ -1,0 +1,264 @@
+{
+  "info": {
+    "_postman_id": "09b38292-d963-4531-a70a-3e6b24e51b46",
+    "name": "SynapseShop - Aula 5 (Inventory FastAPI)",
+    "description": "Rotas do microsserviço de estoque (FastAPI) sob /api/v1/inventory. Respostas no envelope padrão {status, data, message}. Variável base_url=http://localhost:8001.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Core",
+      "item": [
+        {
+          "name": "Metadados do serviço",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "GET /. Esperado: 200 com {status, data: {name, version}} no envelope."
+          },
+          "response": []
+        },
+        {
+          "name": "Healthcheck",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Disponibilidade do serviço. Esperado: 200 {\"status\": \"ok\", \"service\": \"synapseshop-inventory\"}."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "item": [
+        {
+          "name": "Listar itens de estoque",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory"]
+            },
+            "description": "GET list. Esperado: 200 com a lista de itens no envelope."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar item de estoque",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"APL-IP15-128\",\n  \"name\": \"iPhone 15 128GB\",\n  \"quantity\": 10,\n  \"reserved\": 0,\n  \"reorder_level\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory"]
+            },
+            "description": "POST. Esperado: 201 Created. SKU no formato '^[A-Z]{2,4}-[A-Z0-9-]+$'."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar item duplicado",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"APL-IP15-128\",\n  \"name\": \"iPhone 15 128GB\",\n  \"quantity\": 10,\n  \"reserved\": 0,\n  \"reorder_level\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory"]
+            },
+            "description": "POST com SKU já registrado. Esperado: 409 Conflict (envelope error)."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar item inválido (SKU fora do padrão)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"sku-invalido\",\n  \"name\": \"iPhone 15 128GB\",\n  \"quantity\": 10,\n  \"reserved\": 0,\n  \"reorder_level\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory"]
+            },
+            "description": "POST com SKU fora do padrão '^[A-Z]{2,4}-[A-Z0-9-]+$'. Esperado: 400 Bad Request (handler customizado)."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar item inválido (quantity negativa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"APL-IP15-256\",\n  \"name\": \"iPhone 15 256GB\",\n  \"quantity\": -1,\n  \"reserved\": 0,\n  \"reorder_level\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory"]
+            },
+            "description": "POST com quantity < 0. Esperado: 400 Bad Request."
+          },
+          "response": []
+        },
+        {
+          "name": "Obter item por SKU",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory/APL-IP15-128",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory", "APL-IP15-128"]
+            },
+            "description": "GET detail. Esperado: 200 com o item no envelope."
+          },
+          "response": []
+        },
+        {
+          "name": "Item inexistente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory/SAM-NADA-01",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory", "SAM-NADA-01"]
+            },
+            "description": "GET detail com SKU válido porém inexistente. Esperado: 404 Not Found."
+          },
+          "response": []
+        },
+        {
+          "name": "Path de SKU malformado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory/abc",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory", "abc"]
+            },
+            "description": "GET com SKU fora do padrão no path. Esperado: 400 Bad Request."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar item (PATCH parcial)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 8,\n  \"reserved\": 2\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory/APL-IP15-128",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory", "APL-IP15-128"]
+            },
+            "description": "PATCH parcial. Esperado: 200 com o item atualizado."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar item (PATCH payload vazio)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory/APL-IP15-128",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory", "APL-IP15-128"]
+            },
+            "description": "PATCH sem nenhum campo. Esperado: 400 Bad Request (nenhum campo fornecido)."
+          },
+          "response": []
+        },
+        {
+          "name": "Excluir item",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory/APL-IP15-128",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory", "APL-IP15-128"]
+            },
+            "description": "DELETE. Esperado: 204 No Content."
+          },
+          "response": []
+        },
+        {
+          "name": "Item após exclusão",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/inventory/APL-IP15-128",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "inventory", "APL-IP15-128"]
+            },
+            "description": "GET do item excluído. Esperado: 404 Not Found."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8001"
+    }
+  ]
+}
