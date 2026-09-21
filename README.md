@@ -242,6 +242,43 @@ escopo: o `CHECK reserved <= quantity` foi avaliado e **descartado** nesta
 etapa — exigiria regra de negócio no PATCH que fugiria do escopo e quebraria o
 contrato da Aula 5.
 
+### Índices essenciais por modelo (Django + FastAPI)
+
+Auditoria de índices para **todos os modelos de domínio** do projeto (User,
+Item, Category, InventoryItem), derivada das consultas reais (viewsets,
+serializers e Admin) e do estado verificado no banco via `pg_indexes`:
+
+| Modelo          | Índice                                        | Propósito                                            | Situação      |
+| --------------- | --------------------------------------------- | ---------------------------------------------------- | ------------- |
+| User (`auth_user`) | PK `id` + **UNIQUE `username`**           | PK; login/lookups por username (Aula 7)              | nativo Django |
+| User            | **`auth_user_email_idx`** (btree em `email`)  | colunas de acesso comuns do modelo User              | **nova** (Aula 6) |
+| Item (`core_item`) | PK `id` + **UNIQUE `sku`**                 | PK; identidade/lookups por SKU                       | Aula 4        |
+| Item            | `core_item_created_at_desc_idx` (`created_at DESC`) | `ORDER BY -created_at` do ItemViewSet e Admin | **nova** (Aula 6) |
+| Item            | `core_item_category_id` (FK)                   | join `Count("items")` do CategoryViewSet            | Aula 4        |
+| Category (`core_category`) | PK `id` + **UNIQUE `name`** + **UNIQUE `slug`** | PK; lookups/ordenação por nome; acesso por slug | Aula 4        |
+| InventoryItem (`inventory_items`) | PK `id` + **UNIQUE `sku`** | PK; get/patch/delete por SKU | Aula 6 (Alembic) |
+
+As duas novas migrações **Django** garantem a governança de tabelas:
+
+- `core/0002_alter_item_created_at_desc_index` — `AddIndex` do `-created_at`
+  (`Meta.indexes` do `Item`). Sem backing index, a listagem padrão da API
+  (`ItemViewSet.order_by("-created_at")`) e do Admin faria `seq-scan + sort`.
+- `core/0003_auth_user_email_index` — data migration com `RunSQL`
+  (`CREATE INDEX IF NOT EXISTS ... ON auth_user (email)`) e `reverse_sql` de
+  rollback. O `django.contrib.auth` não indexa `email`; como o app é de
+  terceiros, o índice nasce no app `core` — o `auth_user` continua inteiramente
+  sob o comando do Django.
+
+O Alembic não precisou de mudanças (a cobertura do `inventory_items` já era
+completa) e o `alembic check` segue retornando "No new upgrade operations
+detected" — revalidando o filtro `include_object`.
+
+**Deliberadamente fora do escopo de "essencial"** (documentado para não voltar à
+pauta sem motivo): busca textual com `ILIKE '%...'` no Admin (exigiria
+`pg_trgm` + GIN), índice em `is_active` (baixa cardinalidade, usado só em
+`list_filter`) e índice composto `(category_id, created_at DESC)` (padrão
+"categoria → mais recentes" ainda não é consultado por nenhuma rota).
+
 ### Camadas Repository + Service (transações)
 
 - `app/repositories/inventory.py` — `InventoryRepository`: acesso a dados
@@ -301,6 +338,7 @@ coexistência `auth_*`/`core_*` (Django) + `inventory_items`/`alembic_version`.
 
 - [x] Modelagem relacional de User (Django auth) e InventoryItem (FastAPI).
 - [x] Índices essenciais definidos (PK + índice único de SKU + backing indexes).
+- [x] Índices essenciais de TODOS os modelos auditados e complementados (User/Item/Category/InventoryItem).
 - [x] Regras de integridade relacional aplicadas (NOT NULL, UNIQUE, CHECK).
 - [x] Migrações criadas e executadas com SQLAlchemy + Alembic no PostgreSQL.
 - [x] Versionamento do schema implementado (`alembic_version` + revisões).

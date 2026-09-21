@@ -70,6 +70,12 @@ class Item(models.Model):
         ordering = ["-created_at"]
         verbose_name = "produto"
         verbose_name_plural = "produtos"
+        # Índice essencial da listagem padrão (API `ItemViewSet` + Admin): ambas
+        # ordenam por `-created_at` e, sem índice de suporte, o PostgreSQL faria
+        # seq-scan + sort conforme o catálogo cresce.
+        indexes = [
+            models.Index(fields=["-created_at"], name="core_item_created_at_desc_idx"),
+        ]
 
     def __str__(self):
         return f"{self.brand} {self.model} ({self.sku})"

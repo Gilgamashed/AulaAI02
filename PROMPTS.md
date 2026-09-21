@@ -363,3 +363,11 @@ executada (registrar apenas usos reais durante o desenvolvimento).
 - **Revisão humana/ajuste manual:** matriz de status revalidada via API real
   (POST duplicado 409, GET inexistente 404, PATCH parcial 200, DELETE 204);
   tempos coletados em duas rodadas registrados no README.
+## [2026-09-21] Aula 6 - Indices essenciais por modelo (User, Item, Category, InventoryItem)
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Spec da Aula 6 (modelagem/indices) - complementar a cobertura de indices dos modelos de dominio ja iniciada (PK + UNIQUE sku do inventory).
+- **Prompt:** 'Levando em conta todos os modelos do projeto (Django: Users, Item, Category, FastAPI: InventoryItem), vamos desenvolver indices essenciais para cada uma delas.'
+- **Resultado/Decisao:** auditoria via pg_indexes + consultas reais (ItemViewSet/Admin). Category e InventoryItem ja cobertos; duas lacunas reais. Item ganhou core_item_created_at_desc_idx (Index desc via Meta.indexes, migracao core 0002) para o ORDER BY -created_at da API/Admin. User ganhou uth_user_email_idx (data migration core 0003 com RunSQL, reverse_sql de rollback) pois o contrib nao indexa email - governanca preservada (Django dono do auth_user; Alembic intocado, lembic check segue limpo).
+- **Revisao humana/ajuste manual:** opcoes de escopo apresentadas ao time (email agora vs Aula 7; created_at simples vs composto) - confirmado entrar agora com created_at simples. makemigrations travou no Python 3.14 local; migracoes escritas manualmente e validadas por paridade no container (makemigrations --check = 'No changes detected').
+
