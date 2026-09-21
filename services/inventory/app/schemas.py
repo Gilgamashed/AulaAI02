@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
 
 # Mesmo formato de SKU validado na Aula 4 (api/core/models.py: validate_sku),
 # para manter consistência entre a API principal e o microsserviço de estoque.
@@ -15,9 +17,8 @@ class HealthResponse(BaseModel):
 class InventoryItemCreate(BaseModel):
     """Payload de criação de um item de inventário (domínio real).
 
-    Sem banco de dados nesta fase (modelagem relacional é a Aula 6); os campos
-    descrevem o estoque em si: quantidade disponível, reservada e nível de
-    reposição.
+    Aula 6 — o domínio continua o mesmo da Aula 5 (sku, name, quantity,
+    reserved, reorder_level), agora persistido na tabela `inventory_items`.
     """
 
     sku: str = Field(
@@ -41,8 +42,15 @@ class InventoryItemUpdate(BaseModel):
 
 
 class InventoryItem(InventoryItemCreate):
-    """Representação de um item de inventário residente em memória.
+    """Representação de leitura de um item de inventário persistido.
 
-    O uso de dicionário em memória apenas exercita o fluxo das rotas no
-    scaffold; a persistência real fica para a Aula 6.
+    Aula 6 — além dos campos de negócio, expõe o id e os timestamps gerados
+    pelo banco. `from_attributes` permite validar diretamente o objeto SQLAlchemy
+    retornado pela camada de serviço.
     """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(examples=[1])
+    created_at: datetime
+    updated_at: datetime

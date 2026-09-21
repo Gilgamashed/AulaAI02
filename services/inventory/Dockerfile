@@ -44,11 +44,18 @@ RUN useradd --create-home --shell /bin/bash appuser
 COPY --from=builder /install /usr/local
 
 # Código-fonte por último (preserva o cache das camadas anteriores).
+# Aula 6: além do `app`, a imagem também carrega o schema do Alembic
+# (alembic.ini + alembic/) e o script de medição de transações.
 COPY --chown=appuser:appuser app ./app
+COPY --chown=appuser:appuser alembic ./alembic
+COPY --chown=appuser:appuser alembic.ini .
+COPY --chown=appuser:appuser scripts ./scripts
 
 USER appuser
 
 EXPOSE 8001
 
-# Runtime ASGI na porta 8001.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# Runtime ASGI na porta 8001. Antes de servir, aplica as migrações do schema
+# do microserviço (Alembic) — o compose garante o banco saudável via
+# depends_on: db: service_healthy.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8001"]

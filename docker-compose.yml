@@ -42,8 +42,15 @@ services:
     restart: unless-stopped
     ports:
       - "8001:8001"
-    # Microsserviço de estoque (Aula 5): sem banco nesta fase — persistência
-    # em memória até a Aula 6. Por isso não há depends_on do serviço db.
+    # Aula 6: o inventory ganha persistência no PostgreSQL compartilhado com o
+    # Django. Ele só inicia após o banco estar saudável; no startup aplica as
+    # próprias migrações (Alembic) e o Django continua dono das próprias
+    # tabelas (auth_user, core_*, ...) — sem conflito de versionamento.
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 10s

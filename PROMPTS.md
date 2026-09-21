@@ -310,3 +310,56 @@ executada (registrar apenas usos reais durante o desenvolvimento).
   healthy).
 - **Revisão humana:** multistage adotado pela squad; nova rodada de validação
   sem regressões (runtime como `appuser`/uid 1000 confirmado).
+
+## [2026-09-21] Aula 6 — Modelagem relacional do User e migrações (spec itens 1–4)
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Spec da Aula 6 — modelagem relacional de pelo menos uma
+  entidade, índices, integridade e migrações com SQLAlchemy/Alembic no
+  PostgreSQL. A squad optou pela **entidade User** usando o auth padrão do
+  Django e pelas tabelas do FastAPI (inventory) governadas pelo Alembic.
+- **Prompt:** "elaborar uma modelagem relacional para uma entidade User usando o
+  sistema de autenticação padrão do Django e usando SQLAlchemy e Alembic para
+  evitar conflitos e dar mais liberdade e performance ao FastAPI... O Django
+  deve gerenciar suas próprias tabelas e o Alembic vai gerenciar as tabelas do
+  FastAPI. Vamos ignorar Token ou Pedido por enquanto." Decisões alinhadas via
+  perguntas: (1) divisão de tabelas — Django=`auth_user`, Alembic=`inventory`;
+  (2) testes transacionais — script leve de medição sem pytest (suíte fica para
+  a Aula 12).
+- **Resultado/Decisão:** dois ORMs coexistindo no mesmo banco sem conflito de
+  versionamento. Django continua dono do `auth_user` (índice único em
+  `username`; sem customizar `AUTH_USER_MODEL`). FastAPI ganhou modelo
+  `InventoryItem` (`inventory_items`) em SQLAlchemy 2.0 com PK, UNIQUE INDEX em
+  `sku` (índice essencial) e CHECKs `>= 0`; camadas `repositories/` e
+  `services/` (fronteira transacional commit/rollback); `alembic/env.py` com
+  filtro `include_object` para o autogenerate nunca tocar as tabelas do Django;
+  migração inicial `a7f9e2c1b4d8_inventory_items.py`; Dockerfile/compose
+  passaram a aplicar `alembic upgrade head` no startup com `depends_on` no banco.
+- **Revisão humana/ajuste manual:** `alembic check` apontou pendência de
+  `comment` na coluna `sku` → corrigido na migração e reaplicado (downgrade →
+  upgrade); `check` voltou a reportar "No new upgrade operations detected".
+  Rollback validado: `downgrade -1` removeu `inventory_items` e manteve as
+  tabelas do Django intactas. Qualidade validada com `ruff` e `mypy` (0 erros).
+
+## [2026-09-21] Aula 6 — Repositórios, serviço, medições e registro (spec itens 5–8)
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** Spec da Aula 6 — implementar repositórios transacionais, o
+  serviço que os consome, realizar testes transacionais iniciais, coletar
+  tempos e registrar formalmente as decisões técnicas no repositório.
+- **Prompt:** "vamos executar esse plano" (plano aprovado da Aula 6: camadas
+  Repository/Service, rotas via `Depends`, script `measure_transactions.py`,
+  decisões técnicas no README, migrações via Docker).
+- **Resultado/Decisão:** `InventoryRepository` (CRUD sobre `Session`) e
+  `InventoryService` (regras 200/201/204/400/404/409 + commit/rollback) no
+  serviço; rotas agora dependem do serviço; `InventoryItem` (schema) ganhou
+  `id`/`created_at`/`updated_at` e `from_attributes`. Script de medição
+  executado no container (50 itens, 1 commit/op): create ~7–13 ms/op, lookup
+  por SKU ~0,9–2,3 ms (índice único), list ~3,4 ms, update ~5,5–16 ms, delete
+  ~5,6–15 ms; rollback demonstrado (linha de transação abortada não persistida)
+  e coexistência `auth_*` + `inventory_items`/`alembic_version` confirmada no
+  `information_schema`. Decisões técnicas registradas na seção da Aula 6 do
+  README (incl. descarte documentado do CHECK `reserved <= quantity`).
+- **Revisão humana/ajuste manual:** matriz de status revalidada via API real
+  (POST duplicado 409, GET inexistente 404, PATCH parcial 200, DELETE 204);
+  tempos coletados em duas rodadas registrados no README.

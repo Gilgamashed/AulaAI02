@@ -69,7 +69,7 @@ composto por três serviços:
 | ------------ | ------------------ | ---------------------------------------------------- |
 | `api`        | build do Dockerfile | API Django REST Framework: `/health` + rotas CRUD em `/api/v1/` (porta 8000) |
 | `db`         | `postgres:16-alpine` | Banco PostgreSQL (volume `pgdata` para persistência) |
-| `inventory`  | build de `services/inventory/Dockerfile` | Microsserviço FastAPI de estoque: `/health`, `/docs` e CRUD em `/api/v1/inventory` (porta 8001) |
+| `inventory`  | build de `services/inventory/Dockerfile` | Microsserviço FastAPI de estoque: `/health`, `/docs` e CRUD em `/api/v1/inventory` (porta 8001); persistência própria no PostgreSQL governada pelo Alembic (Aula 6) |
 
 O `Dockerfile` usa **multistage build** (`builder` prepara as dependências;
 `runtime` copia apenas o necessário) com cache eficiente de dependências e
@@ -155,8 +155,9 @@ Coleção exportada para teste (importar no Postman e definir a variável
 
 Microsserviço complementar de inventário em **FastAPI** (`services/inventory/`),
 na porta **8001** (a 8000 é do Django). O domínio é o estoque real:
-`sku`, `name`, `quantity` (disponível), `reserved` e `reorder_level`. Sem banco
-nesta fase (persistência em memória; modelagem relacional é a Aula 6).
+`sku`, `name`, `quantity` (disponível), `reserved` e `reorder_level`. Na Aula 5
+a persistência era em memória; a partir da Aula 6 o estoque é persistido em
+PostgreSQL com esquema governado pelo Alembic (ver seção da Aula 6).
 
 | Rota                            | Verbos                  | Descrição                                      |
 | ------------------------------- | ----------------------- | ---------------------------------------------- |
@@ -188,6 +189,128 @@ Qualidade do serviço validada com `ruff` e `mypy` (config em
 Coleção exportada para teste (importar no Postman e definir a variável
 `base_url` como `http://localhost:8001`):
 `collections/synapseshop_aula5.postman_collection.json`.
+
+## Modelagem relacional, índices e migrações (Aula 6)
+
+### Decisão arquitetural: dois ORMs no mesmo PostgreSQL
+
+O banco `synapse` é compartilhado entre a API principal e o microsserviço de
+estoque, mas cada camada é **dona** das próprias tabelas — o que evita qualquer
+conflito de versionamento de schema:
+
+| Dono    | Tabelas                                                  | Versionamento                          |
+| ------- | -------------------------------------------------------- | -------------------------------------- |
+| Django  | `auth_*`, `core_*`, `django_session`, `django_migrations` | `python api/manage.py migrate` (Aula 4) |
+| FastAPI | `inventory_items` + `alembic_version`                    | `alembic upgrade head` (Aula 6)         |
+
+O `alembic/env.py` filtra o `autogenerate`/`check` via `include_object` para
+enxergar **apenas** o metadata do inventory — o Alembic nunca gera DDL para as
+tabelas do Django, mesmo estando no mesmo banco.
+
+### Modelagem relacional (entidade User)
+
+A entidade **User** foi modelada sobre o sistema de autenticação padrão do
+Django (`django.contrib.auth`) — decisão deliberada: reutilizar o `auth_user`
+testado/battle-tested em vez de duplicar usuários no SQLAlchemy. O `username`
+tem índice **único** (PK + integridade), senha armazenada como hash, e as
+relações N:N com `auth_group`/`auth_permission` via tabelas de associação
+(`auth_user_groups`, `auth_user_user_permissions`). Decisão: **não** customizar
+`AUTH_USER_MODEL` nesta aula (evita antecipar as regras de autenticação/Aula 7).
+
+### Modelagem relacional (entidade InventoryItem — FastAPI)
+
+Tabela `inventory_items` (`services/inventory/app/models.py`, SQLAlchemy 2.0):
+
+| Coluna          | Tipo            | Regra                                              |
+| --------------- | --------------- | -------------------------------------------------- |
+| `id`            | `BIGINT`        | PK autoincrement                                   |
+| `sku`           | `VARCHAR(100)`  | NOT NULL, **UNIQUE** (índice `ix_inventory_items_sku`) |
+| `name`          | `VARCHAR(200)`  | NOT NULL                                           |
+| `quantity`      | `INTEGER`       | NOT NULL, DEFAULT 0, CHECK `>= 0`                  |
+| `reserved`      | `INTEGER`       | NOT NULL, DEFAULT 0, CHECK `>= 0`                  |
+| `reorder_level` | `INTEGER`       | NOT NULL, DEFAULT 0, CHECK `>= 0`                  |
+| `created_at`    | `TIMESTAMPTZ`   | NOT NULL, `default now()`                          |
+| `updated_at`    | `TIMESTAMPTZ`   | NOT NULL, `default now()`, `onupdate now()`        |
+
+**Índices essenciais:** PK (`id`) + índice **único** em `sku` — única chave de
+consulta das rotas (get/patch/delete por SKU); o `UNIQUE INDEX` simultaneamente
+garante unicidade (integridade) e performance dos lookups.
+
+**Regras de integridade relacional:** PK, NOT NULL, UNIQUE em SKU e CHECKs de
+quantidades não-negativas (espelham no banco o `ge=0` do Pydantic). Decisão de
+escopo: o `CHECK reserved <= quantity` foi avaliado e **descartado** nesta
+etapa — exigiria regra de negócio no PATCH que fugiria do escopo e quebraria o
+contrato da Aula 5.
+
+### Camadas Repository + Service (transações)
+
+- `app/repositories/inventory.py` — `InventoryRepository`: acesso a dados
+  (create/get_by_sku/list/update/delete) sobre uma `Session`.
+- `app/services/inventory.py` — `InventoryService`: regras de negócio e
+  **fronteira transacional** (commit ao final; rollback em falha), preservando a
+  matriz de status da Aula 5 (200/201/204/400/404/409).
+- Rotas injetam o serviço via `Depends(get_inventory_service)` (uma sessão por
+  requisição em `dependencies.py`).
+
+### Migrações e versionamento (Alembic)
+
+Configuração em `services/inventory/alembic.ini` + `alembic/env.py`. A revisão
+inicial `a7f9e2c1b4d8_inventory_items.py` foi criada e aplicada; o startup do
+container já executa `alembic upgrade head` antes do uvicorn.
+
+Comandos (via `docker compose`, o banco é o mesmo `db` do Django):
+
+```bash
+docker compose exec inventory alembic current   # versão aplicada
+docker compose exec inventory alembic history   # histórico de revisões
+docker compose exec inventory alembic upgrade head   # aplica pendências
+docker compose exec inventory alembic downgrade -1    # rollback seguro
+docker compose exec inventory alembic check      # schema em dia com os models
+```
+
+**Rollback seguro validado:** após o `downgrade -1`, a tabela `inventory_items`
+foi removida e as tabelas do Django (`auth_*`, `django_migrations`) permaneceram
+intactas; o `upgrade head` restaurou a tabela. O `alembic check` retornou
+"No new upgrade operations detected" — provando schema ↔ models em dia e o
+filtro anti-conflito.
+
+### Testes transacionais e tempos de execução
+
+Script `services/inventory/scripts/measure_transactions.py` (não usa pytest —
+suíte fica para a Aula 12, conforme SpecDD):
+
+```bash
+docker compose run --rm inventory python scripts/measure_transactions.py
+```
+
+Medições coletadas (50 itens, 1 commit por operação, via `Service`→`Repository`):
+
+| Operação                      | Total     | Média    |
+| ----------------------------- | --------- | -------- |
+| `create_item` (1 commit/op)   | ~351–660 ms | ~7–13 ms |
+| `get_item` por SKU (lookup)   | ~47–113 ms  | ~0,9–2,3 ms |
+| `list_items` (50 itens)       | ~3,4 ms     | —        |
+| `update_item` (PATCH parcial) | ~275–780 ms | ~5,5–16 ms |
+| `delete_item`                 | ~281–750 ms | ~5,6–15 ms |
+
+O script também **demonstra o rollback** de transação (linha inserida em
+transação abortada NÃO é persistida) e inspeciona o schema confirmando a
+coexistência `auth_*`/`core_*` (Django) + `inventory_items`/`alembic_version`.
+
+### DoD da Aula 6
+
+- [x] Modelagem relacional de User (Django auth) e InventoryItem (FastAPI).
+- [x] Índices essenciais definidos (PK + índice único de SKU + backing indexes).
+- [x] Regras de integridade relacional aplicadas (NOT NULL, UNIQUE, CHECK).
+- [x] Migrações criadas e executadas com SQLAlchemy + Alembic no PostgreSQL.
+- [x] Versionamento do schema implementado (`alembic_version` + revisões).
+- [x] Rollback seguro demonstrado e validado.
+- [x] Repositório transacional implementado (`InventoryRepository`).
+- [x] Serviço consumindo o repositório (`InventoryService`).
+- [x] Testes transacionais iniciais realizados (script de medição).
+- [x] Tempos de execução coletados e registrados.
+- [x] Decições técnicas registradas neste README.
+- [x] Não-antecipação respeitada (sem JWT/Redis/pytest/Order/Pedido).
 
 ## Referências
 

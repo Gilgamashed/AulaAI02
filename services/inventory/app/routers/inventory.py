@@ -1,22 +1,13 @@
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, Depends, Path
 
+from ..dependencies import get_inventory_service
 from ..responses import ApiResponse, ok
 from ..schemas import SKU_PATTERN, InventoryItem, InventoryItemCreate, InventoryItemUpdate
+from ..services.inventory import InventoryService
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
 
-# Acervo em memória apenas para exercitar o fluxo das rotas no scaffold.
-# A persistência real fica para a Aula 6 (modelagem relacional).
-_ITEMS: dict[str, InventoryItem] = {}
-
 _SKU_DESCRIPTION = "SKU do produto, no formato da Aula 4 (ex.: XXXX-AAAA-BBBB)."
-
-
-def _get_or_404(sku: str) -> InventoryItem:
-    item = _ITEMS.get(sku)
-    if item is None:
-        raise HTTPException(status_code=404, detail=f"Item de inventário '{sku}' não encontrado")
-    return item
 
 
 @router.get(
@@ -24,8 +15,11 @@ def _get_or_404(sku: str) -> InventoryItem:
     response_model=ApiResponse[list[InventoryItem]],
     summary="Lista os itens de inventário",
 )
-async def list_items() -> ApiResponse[list[InventoryItem]]:
-    return ok(list(_ITEMS.values()))
+async def list_items(
+    service: InventoryService = Depends(get_inventory_service),
+) -> ApiResponse[list[InventoryItem]]:
+    items = [InventoryItem.model_validate(item) for item in service.list_items()]
+    return ok(items)
 
 
 @router.post(
@@ -34,11 +28,11 @@ async def list_items() -> ApiResponse[list[InventoryItem]]:
     status_code=201,
     summary="Registra um item de inventário",
 )
-async def create_item(payload: InventoryItemCreate) -> ApiResponse[InventoryItem]:
-    if payload.sku in _ITEMS:
-        raise HTTPException(status_code=409, detail=f"SKU '{payload.sku}' já registrado")
-    item = InventoryItem(**payload.model_dump())
-    _ITEMS[item.sku] = item
+async def create_item(
+    payload: InventoryItemCreate,
+    service: InventoryService = Depends(get_inventory_service),
+) -> ApiResponse[InventoryItem]:
+    item = InventoryItem.model_validate(service.create_item(payload))
     return ok(item)
 
 
@@ -49,8 +43,10 @@ async def create_item(payload: InventoryItemCreate) -> ApiResponse[InventoryItem
 )
 async def get_item(
     sku: str = Path(pattern=SKU_PATTERN, description=_SKU_DESCRIPTION),
+    service: InventoryService = Depends(get_inventory_service),
 ) -> ApiResponse[InventoryItem]:
-    return ok(_get_or_404(sku))
+    item = InventoryItem.model_validate(service.get_item(sku))
+    return ok(item)
 
 
 @router.patch(
@@ -61,13 +57,10 @@ async def get_item(
 async def update_item(
     payload: InventoryItemUpdate,
     sku: str = Path(pattern=SKU_PATTERN, description=_SKU_DESCRIPTION),
+    service: InventoryService = Depends(get_inventory_service),
 ) -> ApiResponse[InventoryItem]:
-    updates = payload.model_dump(exclude_unset=True)
-    if not updates:
-        raise HTTPException(status_code=400, detail="Nenhum campo fornecido para atualização")
-    item = _get_or_404(sku)
-    _ITEMS[sku] = item.model_copy(update=updates)
-    return ok(_ITEMS[sku])
+    item = InventoryItem.model_validate(service.update_item(sku, payload))
+    return ok(item)
 
 
 @router.delete(
@@ -75,6 +68,8 @@ async def update_item(
     status_code=204,
     summary="Remove um item de inventário",
 )
-async def delete_item(sku: str = Path(pattern=SKU_PATTERN, description=_SKU_DESCRIPTION)) -> None:
-    _get_or_404(sku)
-    del _ITEMS[sku]
+async def delete_item(
+    sku: str = Path(pattern=SKU_PATTERN, description=_SKU_DESCRIPTION),
+    service: InventoryService = Depends(get_inventory_service),
+) -> None:
+    service.delete_item(sku)
