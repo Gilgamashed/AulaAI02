@@ -380,3 +380,12 @@ executada (registrar apenas usos reais durante o desenvolvimento).
 - **Resultado/Decisao:** nao era o Python 3.14 — era conectividade. O servico db do compose nao publicava a porta 5432 e o default do settings apontava para localhost:5432, logo o makemigrations (que consulta django_migrations via MigrationRecorder) travava na conexao psycopg. Resolvido pela opcao B: ports: [5432:5432] no servico db + DATABASE_URL local montada a partir do .env (credenciais reais, nao o default synapse/synapse/synapse). Valorizado com makemigrations --check/dry-run = No changes detected e migrate --noinput = No migrations to apply, sem travamento.
 - **Revisao humana/ajuste manual:** container db recriado (dados preservados via volume pgdata); conectividade confirmada com psycopg no host (banco/usuario reais); fluxo docountado na secao Aula 6 do README (comandos locais + observacao dos dois caminhos de DATABASE_URL, db:5432 vs localhost:5432).
 
+
+## [2026-09-21] Aula 6 - Demonstracao dos rollbacks seguros (Alembic + Django) no mesmo banco
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** DoD da Aula 6 exige 'Rollback seguro demonstrado e validado'. O rollback do Alembic havia sido demonstrado na sessao anterior; faltava demonstrar o rollback das migracoes Django (0003/0002) e a prova de isolamento entre os dois versionamentos.
+- **Prompt:** confirmes que 'versionamento do schema de forma segura foi bem configurado' e que os 'rollbacks seguros das migracoes foram demonstrados e validados' - o time pediu para comprovar, executar e documentar (sem commit).
+- **Resultado/Decisao:** auditoria read-only comprovou a configuracao (ver env.py include_object, cadeia linear a7f9e2c1b4d8, alembic current/check, django_migrations 0001-0003). Executadas 4 etapas: (1) lembic downgrade -1 removeu inventory_items e zerou alembic_version, deixando auth_user/core_item/django_migrations intactos; (2) lembic upgrade head restaurou tabela + ix_inventory_items_sku, alembic check limpo; (3) migrate core 0001 desfez 0003 (reverse_sql do email) e 0002 (RemoveIndex do created_at), preservando 13 colunas e a linha de core_item; (4) migrate core reaplicou ate o head. Isolamento comprovado: durante o rollback do Alembic o django_migrations nao mudou e vice-versa; ao final alembic check + migrate --plan + makemigrations --check todos convergem em 'sem mudancas'.
+- **Revisao humana/ajuste manual:** nenhum commit/push foi feito (decisao do time); evidencia registrada no README (tabela de checkpoints por etapa) e neste PROMPTS.md.
+

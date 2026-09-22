@@ -305,11 +305,34 @@ docker compose exec inventory alembic downgrade -1    # rollback seguro
 docker compose exec inventory alembic check      # schema em dia com os models
 ```
 
-**Rollback seguro validado:** após o `downgrade -1`, a tabela `inventory_items`
-foi removida e as tabelas do Django (`auth_*`, `django_migrations`) permaneceram
-intactas; o `upgrade head` restaurou a tabela. O `alembic check` retornou
-"No new upgrade operations detected" — provando schema ↔ models em dia e o
-filtro anti-conflito.
+**Rollback seguro validado (Alembic):** após o `downgrade -1`, a tabela
+`inventory_items` foi removida e as tabelas do Django (`auth_*`, `core_*`,
+`django_migrations`) permaneceram intactas; o `upgrade head` restaurou a tabela
+e o índice único de SKU. `alembic check` retornou "No new upgrade operations
+detected" — schema ↔ models em dia e filtro anti-conflito operando.
+
+**Rollback seguro validado (Django):** as migrações `core` também foram
+demonstradas no sentido inverso com o mesmo banco:
+
+```bash
+docker compose exec api python api/manage.py migrate core 0001   # desfaz 0003 e 0002
+docker compose exec api python api/manage.py migrate core        # reaplica até o head
+```
+
+Checkpoints verificados durante a demonstração (via `pg_indexes`/`information_schema`):
+
+| Etapa                                     | `core_item_created_at_desc_idx` | `auth_user_email_idx` | `core_item` (dados/colunas) | `alembic_version` |
+| ----------------------------------------- | ----------------------------- | --------------------- | ------------------------- | ----------------- |
+| após `downgrade -1` (Alembic)             | presente                      | presente              | 1 linha / 13 colunas        | vazio             |
+| após `upgrade head` (Alembic)             | presente                      | presente              | 1 linha / 13 colunas        | `a7f9e2c1b4d8`    |
+| após `migrate core 0001` (Django)         | **removido**                  | **removido**          | 1 linha / 13 colunas        | `a7f9e2c1b4d8`    |
+| após `migrate core` (Django, head)        | restaurado                    | restaurado            | 1 linha / 13 colunas        | `a7f9e2c1b4d8`    |
+
+Enquanto um sistema revertia, **o estado do outro permaneceu intocado** — prova
+do isolamento dos dois versionamentos no mesmo PostgreSQL. Ao final, ambos
+convergem: `alembic check` = "No new upgrade operations detected", `migrate --plan`
+= "No planned migration operations" e `makemigrations --check` = "No changes
+detected".
 
 ### Comandos locais de gerenciamento (venv) do Django
 
@@ -373,7 +396,7 @@ coexistência `auth_*`/`core_*` (Django) + `inventory_items`/`alembic_version`.
 - [x] Serviço consumindo o repositório (`InventoryService`).
 - [x] Testes transacionais iniciais realizados (script de medição).
 - [x] Tempos de execução coletados e registrados.
-- [x] Decições técnicas registradas neste README.
+- [x] Decisões técnicas registradas neste README.
 - [x] Não-antecipação respeitada (sem JWT/Redis/pytest/Order/Pedido).
 
 ## Referências
