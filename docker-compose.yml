@@ -24,6 +24,10 @@ services:
     image: postgres:16-alpine
     container_name: synapseshop_db
     restart: unless-stopped
+    # Porta publicada para permitir comandos de gerenciamento local (venv):
+    # makemigrations/migrate do Django contra localhost:5432 (ver README, Aula 6).
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-synapse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-synapse}

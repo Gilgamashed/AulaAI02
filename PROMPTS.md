@@ -371,3 +371,12 @@ executada (registrar apenas usos reais durante o desenvolvimento).
 - **Resultado/Decisao:** auditoria via pg_indexes + consultas reais (ItemViewSet/Admin). Category e InventoryItem ja cobertos; duas lacunas reais. Item ganhou core_item_created_at_desc_idx (Index desc via Meta.indexes, migracao core 0002) para o ORDER BY -created_at da API/Admin. User ganhou uth_user_email_idx (data migration core 0003 com RunSQL, reverse_sql de rollback) pois o contrib nao indexa email - governanca preservada (Django dono do auth_user; Alembic intocado, lembic check segue limpo).
 - **Revisao humana/ajuste manual:** opcoes de escopo apresentadas ao time (email agora vs Aula 7; created_at simples vs composto) - confirmado entrar agora com created_at simples. makemigrations travou no Python 3.14 local; migracoes escritas manualmente e validadas por paridade no container (makemigrations --check = 'No changes detected').
 
+
+## [2026-09-21] Aula 6 - Corrigindo timeout do makemigrations/migrate no venv local
+
+- **Ferramenta:** opencode (opencode/big-pickle)
+- **Contexto:** comando makemigrations core no venv local dava timeout (120s) sem saída; manage.py check funcionava.
+- **Prompt:** 'Eu reparei que o makemigrations e o migrate no .venv estava dando timeout. Isso foi resolvido?'
+- **Resultado/Decisao:** nao era o Python 3.14 — era conectividade. O servico db do compose nao publicava a porta 5432 e o default do settings apontava para localhost:5432, logo o makemigrations (que consulta django_migrations via MigrationRecorder) travava na conexao psycopg. Resolvido pela opcao B: ports: [5432:5432] no servico db + DATABASE_URL local montada a partir do .env (credenciais reais, nao o default synapse/synapse/synapse). Valorizado com makemigrations --check/dry-run = No changes detected e migrate --noinput = No migrations to apply, sem travamento.
+- **Revisao humana/ajuste manual:** container db recriado (dados preservados via volume pgdata); conectividade confirmada com psycopg no host (banco/usuario reais); fluxo docountado na secao Aula 6 do README (comandos locais + observacao dos dois caminhos de DATABASE_URL, db:5432 vs localhost:5432).
+

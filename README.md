@@ -68,7 +68,7 @@ composto por três serviços:
 | Serviço      | Imagem             | Função                                               |
 | ------------ | ------------------ | ---------------------------------------------------- |
 | `api`        | build do Dockerfile | API Django REST Framework: `/health` + rotas CRUD em `/api/v1/` (porta 8000) |
-| `db`         | `postgres:16-alpine` | Banco PostgreSQL (volume `pgdata` para persistência) |
+| `db`         | `postgres:16-alpine` | Banco PostgreSQL (volume `pgdata` para persistência); porta interna `db:5432` **publicada em `localhost:5432`** para permitir comandos de gerenciamento locais (venv) |
 | `inventory`  | build de `services/inventory/Dockerfile` | Microsserviço FastAPI de estoque: `/health`, `/docs` e CRUD em `/api/v1/inventory` (porta 8001); persistência própria no PostgreSQL governada pelo Alembic (Aula 6) |
 
 O `Dockerfile` usa **multistage build** (`builder` prepara as dependências;
@@ -310,6 +310,32 @@ foi removida e as tabelas do Django (`auth_*`, `django_migrations`) permaneceram
 intactas; o `upgrade head` restaurou a tabela. O `alembic check` retornou
 "No new upgrade operations detected" — provando schema ↔ models em dia e o
 filtro anti-conflito.
+
+### Comandos locais de gerenciamento (venv) do Django
+
+A porta `5432` do serviço `db` é publicada em `localhost:5432`, então os
+comandos de gerenciamento do Django podem rodar no `.venv` local (além do modo
+conteinerizado). Duas observações importantes:
+
+1. **O `makemigrations`/`migrate` consultam a tabela `django_migrations`** — sem
+   banco acessível eles travavam na conexão (era esse o timeout). No container a
+   `DATABASE_URL` usa o host interno `db`; localmente ela precisa apontar para
+   `localhost` com as credenciais do `.env` (não as do default `settings.py`).
+2. Comando padrão no PowerShell (monta a `DATABASE_URL` a partir do `.env`):
+
+```powershell
+$e = @{}; Get-Content .env | Where-Object { $_ -match '^\w+=' } | ForEach-Object { $k,$v = $_ -split '=',2; $e[$k]=$v }
+$env:DATABASE_URL = "postgresql://$($e.POSTGRES_USER):$($e.POSTGRES_PASSWORD)@localhost:5432/$($e.POSTGRES_DB)"
+.venv\Scripts\python.exe api\manage.py makemigrations --check     # sem gerar arquivos
+.venv\Scripts\python.exe api\manage.py makemigrations core        # gera migração no host
+.venv\Scripts\python.exe api\manage.py migrate --plan             # pré-visualiza
+.venv\Scripts\python.exe api\manage.py migrate --noinput          # aplica
+```
+
+Validado: `makemigrations --check --dry-run` = "No changes detected",
+`migrate --noinput` = "No migrations to apply" — sem travamento. Nos
+containers, nada muda: `api`/`inventory` continuam usando `db:5432` na rede do
+compose.
 
 ### Testes transacionais e tempos de execução
 
