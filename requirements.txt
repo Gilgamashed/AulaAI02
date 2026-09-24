@@ -6,3 +6,7 @@ djangorestframework>=3.16,<4.0
 dj-database-url>=2.3,<3.0
 psycopg[binary]>=3.2,<4.0
 gunicorn>=23.0,<24.0
+# Aula 7: autenticação JWT sobre o auth.User do Django (SimpleJWT) e
+# filtros declarativos do DRF (django-filter) para listas paginadas.
+djangorestframework-simplejwt>=5.5,<6.0
+django-filter>=25,<26
