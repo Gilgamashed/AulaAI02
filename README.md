@@ -134,6 +134,12 @@ formato `XXXX-AAAA-BBBB`, nomes de categoria/produto/marca/modelo não-vazios
 (sem espaços em branco), `specifications` como objeto JSON e unicidade de
 SKU/categoria.
 
+> **Desde a Aula 7** essas rotas ganharam a camada de acesso: o **GET** (list/
+> detail) permanece público e agora é paginado e filtrável; as escritas exigem
+> **JWT** — **POST** aceita os papéis `user`/`admin`, enquanto **PUT/PATCH/
+> DELETE** são restritos ao papel `admin`. Detalhes em
+> [Autenticação JWT, papéis e throttling (Aula 7)](#autenticação-jwt-papéis-e-throttling-aula-7).
+
 ### Exemplos
 
 ```bash
@@ -398,6 +404,123 @@ coexistência `auth_*`/`core_*` (Django) + `inventory_items`/`alembic_version`.
 - [x] Tempos de execução coletados e registrados.
 - [x] Decisões técnicas registradas neste README.
 - [x] Não-antecipação respeitada (sem JWT/Redis/pytest/Order/Pedido).
+
+## Autenticação JWT, papéis e throttling (Aula 7)
+
+Adiciona a camada de acesso seguro à API do Django. **Decisão:** reutilizar o
+`django.contrib.auth` (User/Groups já existentes) sem customizar
+`AUTH_USER_MODEL` (alinhado à Aula 6); o JWT entra via
+`djangorestframework-simplejwt` e os filtros via `django-filter`.
+
+### Papéis (roles) e usuários demo
+
+Os papéis **admin** e **user** são `Group`s do Django. O comando `seed_auth`
+cria os grupos e dois usuários demo (idempotente; senhas sobrescritas apenas
+no primeiro import):
+
+```bash
+docker compose exec api python api/manage.py seed_auth
+```
+
+| Usuário      | Papel  | Senha (DEV)           | Observação                      |
+| ------------ | ------ | --------------------- | ------------------------------- |
+| `demo_admin` | admin  | `demo-admin@Synapse2026` | `staff` (acessa o Django Admin) |
+| `demo_user`  | user   | `demo-user@Synapse2026` | acesso comum à API             |
+
+> Senhas podem ser definidas via `.env` (`SEED_ADMIN_PASSWORD`,
+> `SEED_USER_PASSWORD`). As credenciais acima são **somente** para ambiente de
+> desenvolvimento.
+
+### Rotas de autenticação (JWT)
+
+| Rota                                | Método | Descrição                                  | Throttle  |
+| ----------------------------------- | ------ | ------------------------------------------ | --------- |
+| `/api/v1/auth/token/`               | POST   | Login → `{access, refresh}`                | `login` (5/min) |
+| `/api/v1/auth/token/refresh/`       | POST   | Troca `refresh` por novo `access`          | `login` (5/min) |
+| `/api/v1/auth/token/verify/`        | POST   | Valida um access token                     | —         |
+
+Tokens: `access` expira em **5 min**, `refresh` em **1 dia** (SimpleJWT). A
+assinatura usa `JWT_SIGNING_KEY` (ou o `DJANGO_SECRET_KEY` como fallback).
+
+### Matriz de permissões
+
+| Verbo          | Público | user        | admin |
+| -------------- | ------- | ----------- | ----- |
+| GET list/detail (`/categories/`, `/items/`) | ✅ 200 | ✅ 200 | ✅ 200 |
+| POST           | ❌ 401  | ✅ 201      | ✅ 201 |
+| PUT/PATCH/DELETE | ❌ 401 | ❌ 403      | ✅ 200/204 |
+
+Implementada com `get_permissions()` em cada viewset; a permissão
+`IsAdminRole` (`api/core/permissions.py`) testa o grupo `admin`/superuser.
+Anônimo escrevendo → **401**; user em rota administrativa → **403**.
+
+### Throttling e segurança mínima
+
+| Taxa      | Aplica-se a                            |
+| --------- | -------------------------------------- |
+| `anon` 20/min | requisições não autenticadas |
+| `user` 100/min | usuários autenticados        |
+| `login` 5/min  | `/auth/token/` e `/auth/token/refresh/` (anti força bruta) |
+
+Configurada em `settings.py` (`DEFAULT_THROTTLE_*`) + `ScopedRateThrottle`
+nas views de token. **Segurança mínima:** autenticação JWT exigida nas
+escritas, `SECURITY_MIDDLEWARE` ativo e segredos via `.env`.
+
+### Paginação e filtros
+
+- **Paginação:** `PageNumberPagination` global (`PAGE_SIZE=20`) → respostas
+  `{count, next, previous, results}` (validação de página inexistente → 404).
+- **Filtros de domínio** (`ItemFilter` em `api/core/filters.py`):
+  `?category=<id>`, `?is_active=true`, `?min_price=`, `?max_price=`.
+  `category` usa `NumberFilter` sobre `category_id`: id inexistente → 200
+  com lista vazia (evita 400 para catálogo público).
+- **Busca livre:** `?search=iphone` (name/brand/model/sku em Item; name/slug
+  em Category).
+- **Ordenação:** `?ordering=-price`, `-created_at`, etc.
+
+### Segredos no `.env`
+
+`.env` é gitignored **(nunca versionado)**; `settings.py` e o compose leem:
+`DJANGO_SECRET_KEY`, `JWT_SIGNING_KEY` e `DJANGO_DEBUG` (o `.env.example`
+documenta os placeholders). Gere valores fortes com:
+
+```powershell
+python -c "from django.utils.crypto import get_random_string; print(get_random_string(50))"
+```
+
+### Matriz de status validada (ambiente conteinerizado)
+
+| Cenário                              | Status |
+| ------------------------------------ | ------ |
+| Healthcheck                          | 200    |
+| Login admin / user (credenciais corretas) | 200 |
+| Login com credencial errada          | 401    |
+| Refresh / verify                     | 200    |
+| GET list/detail sem token            | 200    |
+| POST sem token (categorias e itens)  | 401    |
+| POST com user / admin                | 201    |
+| POST inválido (preço negativo)       | 400    |
+| PUT/PATCH/DELETE com user            | 403    |
+| PUT/PATCH com admin                  | 200    |
+| DELETE com admin                     | 204    |
+| Burst de login (>5/min)              | 429    |
+| Página de listagem inexistente       | 404    |
+
+Coleção exportada para teste:
+`collections/synapseshop_aula7.postman_collection.json` (variáveis
+`base_url`, `token_admin`, `token_user` e `refresh_admin` — os logins
+preenchem os tokens automaticamente).
+
+### DoD da Aula 7
+
+- [x] Autenticação JWT funcional com papéis `admin` e `user` (Groups).
+- [x] Proteção das rotas administrativas (PUT/PATCH/DELETE exigem admin).
+- [x] Throttling e segurança mínima configurados na API.
+- [x] Endpoints críticos com paginação e filtros coerentes.
+- [x] Coleção Postman com cenários de sucesso, erro e acesso negado.
+- [x] Sem placeholders ansiosos nem funcionalidades de aulas futuras
+      (sem Redis, mensageria, blacklist de tokens ou customização de
+      `AUTH_USER_MODEL`).
 
 ## Referências
 

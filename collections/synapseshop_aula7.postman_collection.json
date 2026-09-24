@@ -1,0 +1,668 @@
+{
+  "info": {
+    "_postman_id": "b1a7d6f0-9c3e-4f2a-8b5d-7e1a2c3d4f50",
+    "name": "SynapseShop - Aula 7 (Autenticação JWT, papéis e throttling)",
+    "description": "Autenticação JWT (SimpleJWT) com papéis admin/user, throttling e segredos via .env. Variáveis: base_url=http://localhost:8000; token_admin/token_user são preenchidas automaticamente pelos testes dos logins.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Healthcheck",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "GET /health. Esperado: 200 {\"status\": \"ok\", \"service\": \"synapseshop-api\"}."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Autenticação",
+      "item": [
+        {
+          "name": "Login admin (sucesso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.access) {",
+                  "  pm.collectionVariables.set('token_admin', data.access);",
+                  "  pm.collectionVariables.set('refresh_admin', data.refresh);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_admin\",\n  \"password\": \"demo-admin@Synapse2026\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "POST token (login). Esperado: 200 com access+refresh. O teste grava o access em {{token_admin}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Login user (sucesso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.access) { pm.collectionVariables.set('token_user', data.access); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_user\",\n  \"password\": \"demo-user@Synapse2026\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "POST token (login). Esperado: 200. Grava o access em {{token_user}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Login inválido (erro)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_admin\",\n  \"password\": \"senha-errada\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "POST token com credenciais incorretas. Esperado: 401 (detail de não-autorizado)."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_admin}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/refresh/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", "refresh", ""]
+            },
+            "description": "POST refresh. Esperado: 200 com novo access. Rota com throttle scope 'login'."
+          },
+          "response": []
+        },
+        {
+          "name": "Verificar token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{token_admin}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/verify/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", "verify", ""]
+            },
+            "description": "POST verify. Esperado: 200 {} para token válido."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Categorias",
+      "item": [
+        {
+          "name": "Listar categorias (público)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", ""]
+            },
+            "description": "GET list sem token. Esperado: 200 paginado (count/next/previous/results). Catálogo de leitura pública."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar categorias com busca",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/?search=smart",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", ""],
+              "query": [
+                { "key": "search", "value": "smart" }
+              ]
+            },
+            "description": "GET list com SearchFilter. Esperado: 200 com resultados filtrados por name/slug."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar categoria sem token (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sem Token\",\n  \"description\": \"deve falhar\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", ""]
+            },
+            "description": "POST sem Authorization. Esperado: 401 Não autorizado (escrita exige autenticação)."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar categoria com user (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Audio\",\n  \"description\": \"Fones e caixas de som.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", ""]
+            },
+            "description": "POST com token do papel user. Esperado: 201 Created (user pode incluir no catálogo)."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar categoria com user (403)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"tentativa proibida\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "1", ""]
+            },
+            "description": "PATCH com token user em rota administrativa. Esperado: 403 Forbidden (edição é papel admin)."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar categoria com admin (200)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_admin}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"edição pelo admin\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "1", ""]
+            },
+            "description": "PATCH com token admin. Esperado: 200 OK."
+          },
+          "response": []
+        },
+        {
+          "name": "Excluir categoria com user (403)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "1", ""]
+            },
+            "description": "DELETE com token user. Esperado: 403 Forbidden."
+          },
+          "response": []
+        },
+        {
+          "name": "Excluir categoria com admin (204)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token_admin}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "1", ""]
+            },
+            "description": "DELETE com token admin. Esperado: 204 No Content."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Itens (Produtos)",
+      "item": [
+        {
+          "name": "Listar itens (público, paginado)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            },
+            "description": "GET list sem token. Esperado: 200 paginado (PageNumberPagination, PAGE_SIZE=20)."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar itens com filtros",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/?category=1&is_active=true&min_price=1000&max_price=6000&ordering=-price",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""],
+              "query": [
+                { "key": "category", "value": "1" },
+                { "key": "is_active", "value": "true" },
+                { "key": "min_price", "value": "1000" },
+                { "key": "max_price", "value": "6000" },
+                { "key": "ordering", "value": "-price" }
+              ]
+            },
+            "description": "GET com ItemFilter (django-filter): categoria, ativo e faixa de preço + OrderingFilter. Esperado: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Buscar itens (search)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/?search=iphone",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""],
+              "query": [
+                { "key": "search", "value": "iphone" }
+              ]
+            },
+            "description": "GET com SearchFilter (name/brand/model/sku). Esperado: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar item sem token (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Produto\",\n  \"brand\": \"X\",\n  \"model\": \"Y\",\n  \"sku\": \"XX-001\",\n  \"price\": 100.00,\n  \"category\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            },
+            "description": "POST sem token. Esperado: 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar item com user (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"iPhone 15 128GB\",\n  \"brand\": \"Apple\",\n  \"model\": \"A3090\",\n  \"sku\": \"APL-IP15-128\",\n  \"description\": \"Smartphone 6.1 pol.\",\n  \"price\": 5499.90,\n  \"specifications\": { \"cor\": \"preto\" },\n  \"warranty_months\": 12,\n  \"category\": 1,\n  \"is_active\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            },
+            "description": "POST com token user. Esperado: 201 Created."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar item inválido com user (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Inválido\",\n  \"brand\": \"X\",\n  \"model\": \"Y\",\n  \"sku\": \"XX-000\",\n  \"price\": -10.00,\n  \"category\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            },
+            "description": "POST autenticado com preço negativo. Esperado: 400 Bad Request (validação customizada mantida)."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar item com user (403)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 4999.90\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "1", ""]
+            },
+            "description": "PATCH com token user. Esperado: 403 (edição é rota administrativa)."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar item com admin (200)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_admin}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 4999.90\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "1", ""]
+            },
+            "description": "PATCH com token admin. Esperado: 200 OK."
+          },
+          "response": []
+        },
+        {
+          "name": "Excluir item com user (403)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "1", ""]
+            },
+            "description": "DELETE com token user. Esperado: 403."
+          },
+          "response": []
+        },
+        {
+          "name": "Excluir item com admin (204)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token_admin}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/1/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "1", ""]
+            },
+            "description": "DELETE com token admin. Esperado: 204 No Content."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Throttling",
+      "item": [
+        {
+          "name": "Login burst 1/6",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_user\",\n  \"password\": \"errada\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "Burst de login (scope 'login' = 5/min). Execute as 6 tentativas em sequência rápida; a partir da 5ª/6ª: 429 Too Many Requests."
+          },
+          "response": []
+        },
+        {
+          "name": "Login burst 2/6",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_user\",\n  \"password\": \"errada\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "Tentativa 2/6 do burst (ver burst 1/6)."
+          },
+          "response": []
+        },
+        {
+          "name": "Login burst 3/6",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_user\",\n  \"password\": \"errada\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "Tentativa 3/6 do burst (ver burst 1/6)."
+          },
+          "response": []
+        },
+        {
+          "name": "Login burst 4/6",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_user\",\n  \"password\": \"errada\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "Tentativa 4/6 do burst (ver burst 1/6)."
+          },
+          "response": []
+        },
+        {
+          "name": "Login burst 5/6",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_user\",\n  \"password\": \"errada\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "Tentativa 5/6 do burst — limite de 5/min atingido."
+          },
+          "response": []
+        },
+        {
+          "name": "Login burst 6/6 (429)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_user\",\n  \"password\": \"errada\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "Tentativa 6/6 do burst. Esperado: 429 Too Many Requests (throttling de segurança)."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "token_admin",
+      "value": ""
+    },
+    {
+      "key": "token_user",
+      "value": ""
+    },
+    {
+      "key": "refresh_admin",
+      "value": ""
+    }
+  ]
+}
