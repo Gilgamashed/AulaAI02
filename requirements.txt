@@ -10,3 +10,7 @@ gunicorn>=23.0,<24.0
 # filtros declarativos do DRF (django-filter) para listas paginadas.
 djangorestframework-simplejwt>=5.5,<6.0
 django-filter>=25,<26
+# Aula 8: cliente Redis (redis-py). É a única dependência nova — ele é
+# consumido pelo backend de cache NATIVO do Django
+# (django.core.cache.backends.redis.RedisCache), que já fala SETEX/INCR.
+redis>=5.0,<7.0

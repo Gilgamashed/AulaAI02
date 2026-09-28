@@ -1,13 +1,13 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
-from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
     TokenVerifyView,
 )
 
-from .views import CategoryViewSet, ItemViewSet
+from .throttling import ThrottleMemoriaScope
+from .views import CacheMetricsView, CategoryViewSet, ItemViewSet
 
 
 class LoginThrottledTokenObtainPairView(TokenObtainPairView):
@@ -17,7 +17,7 @@ class LoginThrottledTokenObtainPairView(TokenObtainPairView):
     (5 tentativas/minuto, configurado em settings.py) para conter força bruta.
     """
 
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ThrottleMemoriaScope]
     throttle_scope = "login"
 
 
@@ -27,7 +27,7 @@ class LoginThrottledTokenRefreshView(TokenRefreshView):
     Também entra na cota de "login", pois é uma operação autenticante.
     """
 
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ThrottleMemoriaScope]
     throttle_scope = "login"
 
 
@@ -48,4 +48,11 @@ urlpatterns = [
         name="token_refresh",
     ),
     path("auth/token/verify/", TokenVerifyView.as_view(), name="token_verify"),
+    # Aula 8: métricas de eficácia do cache (hit rate por namespace).
+    # Restrito ao papel admin — ver CacheMetricsView.
+    path(
+        "cache/metrics/",
+        CacheMetricsView.as_view(),
+        name="cache-metrics",
+    ),
 ] + router.urls
