@@ -2,7 +2,7 @@ from django.db.models import Avg, Count, Max, Min
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
-from .models import Category, Item, validate_sku
+from .models import Category, Item, Pedido, validate_sku
 
 
 def _strip_required(value, label):
@@ -174,8 +174,77 @@ class ItemDetalheSerializer(serializers.ModelSerializer):
             obj.category.items.order_by("-price", "id")[:3], many=True
         ).data
 
-    def get_itens_recentes(self, obj: Item) -> list:
-        """Os 3 itens mais recentes da mesma categoria do item."""
+def get_itens_recentes(self, obj: Item) -> list:
+        """Os 3 itens mais recentes da mesma categoria do produto."""
         return ItemResumoSerializer(
             obj.category.items.order_by("-created_at", "id")[:3], many=True
         ).data
+
+
+# =====================================================================
+# Aula 9 — Pedido
+# =====================================================================
+
+
+class ItemPedidoSerializer(serializers.Serializer):
+    """Linha do pedido vinda do cliente: **só o que o cliente decide**.
+
+    O preço unitário NÃO entra no request de propósito. Ele é lido do catálogo
+    (`Item.price`) e devolvido na resposta: um cliente que informasse o preço
+    poderia trocar um iPhone por R$ 0,01, e o evento `PedidoCriado` — que é o
+    que os consumidores vão confiar — carregaria um total inventado.
+    """
+
+    sku = serializers.CharField(max_length=100)
+    quantidade = serializers.IntegerField(min_value=1, max_value=999)
+
+    def validate_sku(self, value):
+        return _strip_required(value, "SKU").upper()
+
+
+class PedidoCreateSerializer(serializers.Serializer):
+    """Entrada do `POST /api/v1/pedidos`.
+
+    Não é um `ModelSerializer` porque dois campos do request **não** são do
+    model: a chave de idempotência vem do header `Idempotency-Key` e o
+    gancho de falha forçada do header `X-Simular-Falha`. A view monta o
+    `Pedido` com o que vem daqui.
+    """
+
+    itens = ItemPedidoSerializer(many=True, allow_empty=False)
+
+    def validate_itens(self, value):
+        if len(value) > 50:
+            raise serializers.ValidationError(
+                "Um pedido pode ter no máximo 50 linhas."
+            )
+        skus = [item["sku"] for item in value]
+        duplicados = {sku for sku in skus if skus.count(sku) > 1}
+        if duplicados:
+            raise serializers.ValidationError(
+                f"SKU repetido no pedido: {', '.join(sorted(duplicados))}."
+            )
+        return value
+
+
+class PedidoSerializer(serializers.ModelSerializer):
+    """Leitura do pedido, já com o estado que o worker persistiu."""
+
+    usuario = serializers.CharField(source="usuario.username", read_only=True)
+
+    class Meta:
+        model = Pedido
+        fields = [
+            "id",
+            "usuario",
+            "status",
+            "itens",
+            "total",
+            "idempotency_key",
+            "tentativas",
+            "motivo_falha",
+            "created_at",
+            "updated_at",
+            "processado_em",
+        ]
+        read_only_fields = fields

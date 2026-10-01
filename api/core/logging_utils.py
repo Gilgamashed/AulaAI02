@@ -1,14 +1,17 @@
-"""Utilitários de logging da Aula 8 (cache-aside).
+"""Utilitários de logging das Aulas 8 (cache-aside) e 9 (mensageria).
 
 O logger `core.cache` (configurado em `config/settings.py`) emite **uma linha
-JSON por evento** de cache. O objetivo é duplo:
+JSON por evento** de cache. O logger `core.messaging` faz o mesmo pelos
+eventos de mensageria (publicação, consumo, duplicata, reentrega, DLQ). O
+objetivo é duplo:
 
 1. **Didático**: a demonstração ao vivo do ciclo *miss → preenchimento → hit*
    fica legível em `docker compose logs -f api` (basta filtrar por
-   `"resultado": "miss"`), sem precisar de um parser de texto.
+   `"resultado": "miss"`), sem precisar de um parser de texto. Na Aula 9 é a
+   mesma ideia para o ciclo *publicado → consumido → reentregue → DLQ*.
 2. **Operacional**: campos estáveis (`evento`, `chave`, `namespace`,
-   `resultado`, `ttl_s`, `latencia_ms`) são exatamente o que um dashboard de
-   métricas vai consumir na Aula 19.
+   `resultado`, `ttl_s`, `latencia_ms`, `tentativa`) são exatamente o que um
+   dashboard de métricas vai consumir na Aula 19.
 
 Registro em log **estruturado** significa que o dado é separado por campos
 nomeados, não concatenado em texto livre — é o que permite agregá-lo depois.
@@ -33,6 +36,19 @@ CAMPOS_EVENTO = (
     "entidade",
     "entidade_id",
     "detalhe",
+    # Aula 9 (mensageria): rastreabilidade do evento entre produtor e
+    # consumidor. `evento_id` e `chave_idempotencia` ligam uma linha do log
+    # da API a uma linha do log do worker; `tentativa`/`atraso_fila_ms`
+    # tornam visíveis a reentrega e o tempo que a mensagem passou na fila;
+    # `duracao_ms` isola o trabalho de dentro do consumidor do espera.
+    "evento_id",
+    "chave_idempotencia",
+    "pedido_id",
+    "tentativa",
+    "atraso_fila_ms",
+    "duracao_ms",
+    "fila",
+    "erro",
 )
 
 

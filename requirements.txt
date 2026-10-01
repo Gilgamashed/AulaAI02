@@ -14,3 +14,7 @@ django-filter>=25,<26
 # consumido pelo backend de cache NATIVO do Django
 # (django.core.cache.backends.redis.RedisCache), que já fala SETEX/INCR.
 redis>=5.0,<7.0
+# Aula 9: cliente AMQP 0-9-1 (RabbitMQ). Escolhido em vez de Celery/kombu
+# porque a spec pede que a política de reentrega e o roteamento para a DLQ
+# sejam visíveis no código do projeto, e não atrás de decorators.
+pika>=1.3,<2.0

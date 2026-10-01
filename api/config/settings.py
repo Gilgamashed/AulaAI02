@@ -200,6 +200,62 @@ CACHE_ENABLED = _env_flag("CACHE_ENABLED", "True")
 CACHE_TTL_LIST = int(os.environ.get("CACHE_TTL_LIST", "60"))
 CACHE_TTL_DETAIL = int(os.environ.get("CACHE_TTL_DETAIL", "300"))
 
+# =====================================================================
+# Aula 9 — Mensageria assíncrona com RabbitMQ
+# =====================================================================
+# Conexão AMQP. No compose, `api` e `worker` recebem a URL com o host
+# interno do serviço `rabbitmq`; o padrão abaixo serve ao Django rodando
+# no venv local (RabbitMQ publicado em localhost:5672).
+#
+# A senha vem do `.env` (RABBITMQ_PASSWORD) e nunca é versionada. Atenção:
+# o usuário `guest` do RabbitMQ só pode se conectar de localhost — por isso
+# o compose cria um usuário de aplicação (`RABBITMQ_USER`).
+RABBITMQ_URL = os.environ.get(
+    "RABBITMQ_URL", "amqp://synapse:synapse@localhost:5672/%2F"
+)
+
+# Topologia (nomes de exchange, filas e routing keys) fica em
+# `core/messaging/topologia.py`; aqui ficam apenas os PARÂMETROS de política,
+# porque são os que mudam entre ambientes (e os que a spec pede documentados).
+PEDIDO_EXCHANGE = os.environ.get("PEDIDO_EXCHANGE", "pedidos")
+PEDIDO_ROUTING_KEY = os.environ.get("PEDIDO_ROUTING_KEY", "pedido.criado")
+PEDIDO_FILA = os.environ.get("PEDIDO_FILA", "pedidos.criados")
+PEDIDO_FILA_DLQ = os.environ.get("PEDIDO_FILA_DLQ", "pedidos.criados.dlq")
+
+# Política de reentrega: 1 tentativa inicial + até N reentregas, cada uma
+# com um atraso próprio. A escada padrão (5s -> 15s -> 45s) é implementada
+# por filas de retry com `x-message-ttl` + dead-letter de volta para a fila
+# principal: o atraso acontece NO BROKER, então o worker não fica ocupado
+# nem faz "busy loop" esperando.
+#
+# Ao esgotar a última reentrega, a mensagem vai para a DLQ. Um payload
+# inválido (contrato quebrado) não consome a escada: vai direto para a DLQ,
+# porque reentregar dez vezes um JSON malformado não o torna válido.
+PEDIDO_MAX_REENTREGAS = int(os.environ.get("PEDIDO_MAX_REENTREGAS", "3"))
+PEDIDO_BACKOFF_SEGUNDOS = tuple(
+    int(segmento)
+    for segmento in os.environ.get("PEDIDO_BACKOFF_SEGUNDOS", "5,15,45").split(",")
+    if segmento.strip()
+)
+
+# TTL da chave de deduplicação. Precisa ser maior que o tempo total da
+# escada de reentrega (5+15+45 = 65 s aqui) com folga, para que a chave não
+# expire enquanto a mensagem ainda está em trânsito. Uma chave que dura
+# pouco permite que uma duplicata atrasada volte a ser "primeira vez".
+DEDUPE_TTL_SEGUNDOS = int(os.environ.get("DEDUPE_TTL_SEGUNDOS", "86400"))
+
+# Interruptor da simulação de falha forçada (validação da DLQ). `true`
+# apenas em desenvolvimento: liga o header `X-Simular-Falha`, que marca o
+# pedido para o worker falhar de propósito. Em produção o header é ignorado.
+PEDIDO_PERMITIR_SIMULACAO_FALHA = _env_flag("PEDIDO_PERMITIR_SIMULACAO_FALHA", "False")
+
+# Se o produtor cair (RabbitMQ fora), o pedido nasce como
+# `pendente_publicacao`, o POST responde 503 e o comando
+# `republicar_pedidos` recupera o que ficou pendente. O caminho feliz é
+# publicar logo após o commit e só então marcar o pedido como `pendente`.
+PEDIDO_ESTADO_INICIAL = "pendente_publicacao"
+PEDIDO_ESTADO_PUBLICADO = "pendente"
+
 CACHES = {
     "default": {
         # Backend NATIVO do Django (>=4.0) sobre o cliente redis-py: já
@@ -228,6 +284,25 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "synapseshop-throttle",
     },
+    # Aula 9: janela de deduplicação da mensageria. Fica em OUTRO banco do
+    # mesmo Redis (db 0) de propósito: as chaves de dedupe são descartáveis
+    # por TTL e não devem conviver com as chaves do cache-aside (que têm
+    # invalidação por evento). Separar os bancos torna a auditoria trivial
+    # (`redis-cli -n 0 keys 'dedupe:*'`) e permite zerar um sem o outro.
+    "dedupe": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": os.environ.get("REDIS_URL_DEDUPE", "redis://localhost:6379/0"),
+        "KEY_PREFIX": "synapseshop",
+        "TIMEOUT": DEDUPE_TTL_SEGUNDOS,
+        "OPTIONS": {
+            # O dedupe é fail-open (ver `core/messaging/dedupe.py`): se o
+            # Redis travar, o worker processa a mensagem e o UPDATE
+            # condicional no banco segue sendo a garantia final de
+            # idempotência. Portanto o timeout pode ser curto.
+            "socket_connect_timeout": 1,
+            "socket_timeout": 1,
+        },
+    },
 }
 
 # =====================================================================
@@ -251,11 +326,20 @@ LOGGING = {
             "formatter": "json",
         },
     },
-    "loggers": {
+"loggers": {
         "core.cache": {
             "handlers": ["console"],
             "level": os.environ.get("CACHE_LOG_LEVEL", "INFO"),
-            # False para o evento não ser reemitido pelos loggers raíz.
+            # False para o evento não ser reemitido pelos loggers raiz.
+            "propagate": False,
+        },
+        # Aula 9: um logger por processo de mensageria. "core.messaging" é
+        # usado pelo produtor (dentro do processo da API) e pelo consumidor
+        # (dentro do processo do worker) — o `docker compose logs -f worker`
+        # mostra as linhas do worker, o da API mostra as do produtor.
+        "core.messaging": {
+            "handlers": ["console"],
+            "level": os.environ.get("MESSAGING_LOG_LEVEL", "INFO"),
             "propagate": False,
         },
     },

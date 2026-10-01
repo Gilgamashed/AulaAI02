@@ -7,7 +7,12 @@ from rest_framework_simplejwt.views import (
 )
 
 from .throttling import ThrottleMemoriaScope
-from .views import CacheMetricsView, CategoryViewSet, ItemViewSet
+from .views import (
+    CacheMetricsView,
+    CategoryViewSet,
+    ItemViewSet,
+    PedidoViewSet,
+)
 
 
 class LoginThrottledTokenObtainPairView(TokenObtainPairView):
@@ -34,6 +39,10 @@ class LoginThrottledTokenRefreshView(TokenRefreshView):
 router = DefaultRouter()
 router.register("categories", CategoryViewSet, basename="category")
 router.register("items", ItemViewSet, basename="item")
+# Aula 9: o pedido é o produtor do evento `PedidoCriado`. Leitura (listagem e
+# detalhe) exige autenticação e, fora do papel admin, só mostra os próprios
+# pedidos — ver `PedidoViewSet.get_queryset`.
+router.register("pedidos", PedidoViewSet, basename="pedido")
 
 # Rotas de autenticação JWT (SimpleJWT) sob o prefixo /api/v1/auth/.
 urlpatterns = [

@@ -13,6 +13,11 @@ services:
       # "sem cache" se o Redis cair em tempo de execução (fail-open).
       redis:
         condition: service_healthy
+      # Aula 9: idem para o broker. O produtor declara a topologia
+      # (exchanges/filas) no startup da API; sem o broker pronto, o
+      # POST /pedidos cairia em 503 de todo modo — melhor esperar.
+      rabbitmq:
+        condition: service_healthy
     environment:
       # Variável mínima injetada: a API localiza o banco pelo nome do serviço 'db'
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
@@ -35,6 +40,23 @@ services:
       # para que a medição de RPS da Aula 8 não seja cortada por 429.
       DRF_ANON_RATE: ${DRF_ANON_RATE:-20/min}
       DRF_USER_RATE: ${DRF_USER_RATE:-100/min}
+      # Aula 9 (mensageria assíncrona com RabbitMQ):
+      #   RABBITMQ_URL -> conexão AMQP com o broker. Publicar é parte do
+      #                   contrato do POST /pedidos: se o broker não estiver
+      #                   lá, a API responde 503 em vez de fingir sucesso.
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-synapse}:${RABBITMQ_PASSWORD:-synapse}@rabbitmq:5672/%2F
+      #   REDIS_URL_DEDUPE -> db 0, exclusivo da janela de idempotência da
+      #                        Aula 9 (o db 1 é o cache-aside da Aula 8).
+      REDIS_URL_DEDUPE: ${REDIS_URL_DEDUPE:-redis://redis:6379/0}
+      #   Política de reentrega e DLQ: 1 tentativa inicial + 3 reentregas
+      #   (5s -> 15s -> 45s) e depois a DLQ. Ver README (Aula 9).
+      DEDUPE_TTL_SEGUNDOS: ${DEDUPE_TTL_SEGUNDOS:-86400}
+      PEDIDO_MAX_REENTREGAS: ${PEDIDO_MAX_REENTREGAS:-3}
+      PEDIDO_BACKOFF_SEGUNDOS: ${PEDIDO_BACKOFF_SEGUNDOS:-5,15,45}
+      # `X-Simular-Falha` é o gancho que valida a DLQ de ponta a ponta. true
+      # só em desenvolvimento — fora dele o header é ignorado pela API.
+      PEDIDO_PERMITIR_SIMULACAO_FALHA: ${PEDIDO_PERMITIR_SIMULACAO_FALHA:-true}
+      MESSAGING_LOG_LEVEL: ${MESSAGING_LOG_LEVEL:-INFO}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -102,5 +124,71 @@ services:
       retries: 5
       start_period: 5s
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: synapseshop_rabbitmq
+    restart: unless-stopped
+    # 5672 = AMQP (os processos da aplicação); 15672 = management web, usada
+    # para inspecionar filas/DLQ na validação e pelo scripts/measure_messaging.py.
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      # Aula 9: usuário de aplicação criado no 1º start. O `guest` padrão do
+      # RabbitMQ só aceita conexão de localhost, então um serviço em outro
+      # container precisa de credencial própria.
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-synapse}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-synapse}
+    # Fila de pedidos é dado de NEGÓCIO (não dado derivado): se o broker
+    # reiniciar, o que está na fila tem de sobreviver. Mantemos o volume
+    # nomeado e as confirmações de publicação no produtor (publisher
+    # confirms) para não perder evento em queda do container.
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  worker:
+    build: .
+    # Aula 10: SEM `container_name`. É o único jeito de o Compose conseguir
+    # criar mais de um worker (`docker compose up -d --scale worker=3`), que é
+    # como se mede o paralelismo: N consumidores na MESMA fila, atendidos em
+    # round-robin pelo broker. Com nome fixo o Compose se recusa a escalar, e o
+    # ganho de processar com mais de um consumidor fica impossível de medir.
+    restart: unless-stopped
+    # Aula 9: o consumidor do evento `PedidoCriado`. Mesma imagem da API de
+    # propósito — é o mesmo código Django, os mesmos models e as mesmas
+    # migrações; só o comando de entrada muda (um management command em vez
+    # do gunicorn). Um microsserviço separado aqui exigiria duplicar a
+    # modelagem de Pedido em um segundo ORM.
+    command: ["python", "api/manage.py", "consumir_pedidos"]
+    depends_on:
+      # Quem aplica as migrações no startup é a API (ver Dockerfile), então o
+      # worker espera a API ficar saudável para não consumir antes das tabelas
+      # existirem. `restart: unless-stopped` cobre o caso inverso.
+      api:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-synapseshop-key}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-synapse}:${RABBITMQ_PASSWORD:-synapse}@rabbitmq:5672/%2F
+      REDIS_URL_DEDUPE: ${REDIS_URL_DEDUPE:-redis://redis:6379/0}
+      DEDUPE_TTL_SEGUNDOS: ${DEDUPE_TTL_SEGUNDOS:-86400}
+      PEDIDO_MAX_REENTREGAS: ${PEDIDO_MAX_REENTREGAS:-3}
+      PEDIDO_BACKOFF_SEGUNDOS: ${PEDIDO_BACKOFF_SEGUNDOS:-5,15,45}
+      MESSAGING_LOG_LEVEL: ${MESSAGING_LOG_LEVEL:-INFO}
+      # Taxas de throttling sem efeito aqui (o worker não faz requisições
+      # HTTP), mas mantidas para o settings não cair em defaults diferentes.
+      DRF_ANON_RATE: ${DRF_ANON_RATE:-20/min}
+      DRF_USER_RATE: ${DRF_USER_RATE:-100/min}
+
 volumes:
   pgdata:
+  rabbitmqdata:
