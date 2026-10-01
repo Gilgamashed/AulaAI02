@@ -679,6 +679,447 @@ intencionalmente rápida e barulhenta em vez de silenciosa, para que a queda do
 cache apareça no log e no dashboard.
 
 
+## Mensageria assíncrona com RabbitMQ (Aula 9)
+
+A Aula 9 introduz o **processamento assíncrono por eventos** para o fluxo de
+pedidos. A API deixa de esperar o processamento terminar: cria o pedido,
+publica o evento `PedidoCriado` com publisher confirms e responde **201**. Um
+**worker** independente consome a fila e avança o estado para `processado` (ou
+`falha`), com **idempotência ponta a ponta** e **DLQ** para falhas
+irrecuperáveis.
+
+### Ambiente: serviços `rabbitmq` e `worker`
+
+O `docker-compose.yml` adiciona dois serviços:
+
+| Serviço      | Imagem                     | Função                                                    |
+| ------------ | -------------------------- | --------------------------------------------------------- |
+| `rabbitmq`    | `rabbitmq:3.13-management-alpine` | Broker AMQP 0-9-1, com a UI de gestão em `http://localhost:15672` (usuário/senha via `.env`). Filas duráveis, exchanges declarados no startup. |
+| `worker`      | build do Dockerfile       | Consumidor assíncrono via `python api/manage.py consumir_pedidos`. Roda no mesmo código Django (mesmos models e migrações), sem duplicar ORM. Sobe após `api` e `rabbitmq` saudáveis. |
+
+O volume `rabbitmqdata` mantém as mensagens persistentes se o container reiniciar.
+
+O serviço `worker` **não** tem `container_name` de propósito: é o que permite
+`docker compose up -d --scale worker=3` (um `container_name` fixo impede
+escalar, porque o segundo container não teria nome livre).
+
+### Contrato do evento `PedidoCriado` (v1)
+
+O evento é definido em [`docs/contracts/pedido_criado.md`](docs/contracts/pedido_criado.md). Campos mínimos de negócio, `idempotency_key`, `publicado_em` (epoch ms) e valores monetários como **string** (evita perda de precisão com Decimal em JSON).
+
+Exemplo resumido:
+
+```json
+{
+  "evento": "PedidoCriado",
+  "versao": 1,
+  "evento_id": "0f9c1e6c-2c1f-4a0a-9a3f-6b1d2c4e5f70",
+  "idempotency_key": "9f2c...64 hex",
+  "origem": "synapseshop-api",
+  "ocorrido_em": "2026-09-30T12:00:00.000Z",
+  "publicado_em": 1759243200123,
+  "pedido": {
+    "id": 42,
+    "usuario_id": 2,
+    "status": "pendente",
+    "total": "1299.90",
+    "itens": [
+      {"sku": "MED-0499", "quantidade": 2, "preco_unitario": "1998.00"}
+    ]
+  }
+}
+```
+
+Validação estrita no consumidor: payload inválido → **DLQ imediata** (falha terminal).
+
+### Idempotência (duas barreiras)
+
+A chave viaja no evento e é usada em **duas camadas independentes**:
+
+1. **Janela de idempotência (Redis db 0)** — `core/messaging/dedupe.py`. Usa `SET key NX EX ttl` (TTL 86.400 s, configurável por `DEDUPE_TTL_SEGUNDOS`). `reservar()` retorna `False` se a chave já existe → mensagem duplicada, `ack` sem aplicar efeito. Em caso de falha do Redis, o código é **fail-open** (processa e deixa o banco proteger). No caminho de falha, `liberar()` apaga a chave para que a reentrega consiga reprocessar.
+2. **Update condicional (PostgreSQL)** — no consumidor: `UPDATE Pedido SET status='processado', ... WHERE pk=? AND idempotency_key=? AND status IN (pendente_publicacao,pendente,falha)`. Se 0 linhas afetadas: (a) já `processado` → duplicata real (log `PedidoDuplicado`, motivo "pedido já estava processado"); (b) chave diferente ou pedido inexistente → `MensagemIncorreta` → **DLQ** (terminal). Esta é a **autoridade final** (sobrevive mesmo com TTL expirado ou Redis indisponível).
+
+A chave de idempotência no POST segue precedência: **header `Idempotency-Key`** (se <=64) ou **SHA-256 canônico** (usuário + itens ordenados por SKU + total). Um reenvio com a mesma chave devolve **HTTP 200** com `"evento": {"duplicado": true, "motivo": "pedido já existente"}` (ou 409 se o corpo for diferente).
+
+### Reentregas, backoff e DLQ
+
+Topologia declarada por `core/messaging/topologia.py`:
+
+```
+exchange pedidos (topic) --routing key pedido.criado--> pedidos.criados
+                                                         │ DLX pedidos.dlx
+exchange pedidos.retry (direct) --retry.1/.2/.3--------> pedidos.criados.retry.N (TTL 5/15/45 s)
+                                                         │ DLX pedidos (volta à principal)
+exchange pedidos.dlx (direct)   --pedido.criado--------> pedidos.criados.dlq (terminal, sem TTL)
+```
+
+Política:
+
+- Tentativa inicial = 0 (header **`x-tentativa`**). Em exceção recuperável, republica para retry `{tentativa+1}` com TTL e `ack` da original.
+- **3 reentregas** após a inicial (total até 4 passagens). Configurável por `PEDIDO_MAX_REENTREGAS` e `PEDIDO_BACKOFF_SEGUNDOS` (5,15,45).
+- Ao esgotar (`tentativa >= max_reentregas`) ou em falha terminal (`ContratoInvalido`, `MensagemIncorreta`, política inconsistente), o pedido é marcado como `status = falha`, a mensagem vai para `pedidos.criados.dlq` e é `ack` — **nunca** reentregada infinitamente.
+
+**Simulação de falha (validação ponta a ponta):** `POST /pedidos/` aceita `X-Simular-Falha: 1` **somente** se `PEDIDO_PERMITIR_SIMULACAO_FALHA=true`. O flag é gravado em `Pedido.simular_falha` e lido **do banco** pelo consumidor: ao processar, se verdadeiro, levanta `FalhaInjetada` (exceção recuperável), forçando a escada completa até a DLQ. Isso prova, com um pedido real e logs por tentativa, que a política de backoff e a DLQ funcionam conforme o desenho.
+
+### Recuperação de publicações falhas
+
+Se o broker estiver indisponível no momento do POST, o `publish` levanta `PublicacaoFalhou` (inclusive para `OSError`/DNS — evita virar 500). A view responde **HTTP 503** com corpo contendo `pedido_id`, `status: pendente_publicacao`, `idempotency_key` e o erro. O comando `python api/manage.py republicar_pedidos` varre pedidos em `pendente_publicacao`, republica seus eventos (publisher confirms) e, só depois do confirm, move-os para `pendente`. Também aceita `--pedido`, `--limit`, `--dry-run`. O idempotente: reenviar o POST com a mesma `Idempotency-Key` enquanto o broker está fora devolve **HTTP 200** com `evento.duplicado = true` e o pedido permanece em `pendente_publicacao`.
+
+### Observabilidade da Aula 9
+
+- **Logs JSON** (logger `core.messaging`): `WorkerIniciado`, `MensagemRecebida`, `PedidoDuplicado`, `PedidoProcessado`, `PedidoFalha`, `PedidoDlq`, `PedidoPublicado`, `PedidoPublicacaoFalhou`, com `evento_id`, `pedido_id`, `chave_idempotencia`, `tentativa`, `atraso_fila_ms`, `duracao_ms`.
+- **Métricas em memória** (`core.messaging.metricas`): `recebidas`, `processadas`, `duplicadas`, `falhas`, `reentregas`, `dlq`, `invalidas`.
+- **Medição ponta a ponta**: `scripts/measure_messaging.py` (stdlib) faz POST autenticado com `Idempotency-Key` explícita, aguarda `processado` por polling com intervalo adaptativo e reporta: latência **POST** (publisher confirm) e **publicação→processado** (baseada em `evento.publicado_em`), idempotência (3 reenvios), escada de reentrega com timestamps por tentativa, e profundidade das filas via Management API (`:15672`). Usa sessão JWT com renovação automática e pode `--purgar` as filas antes da medição.
+
+**Medições reais (execução local, 20 pedidos + idempotência + DLQ):**
+
+| Métrica | n | média | p50 | p95 | máx |
+|---|---|---|---|---|---|
+| POST (publisher confirm) | 20 | 78,83 ms | — | 101,76 ms | 105,45 ms |
+| publicação → processado | 20 | 82,35 ms | 75 ms | 124 ms | 172 ms |
+
+**Idempotência:** 3 reenvios com a mesma `Idempotency-Key` → **HTTP 200**, mesmo `pedido_id`, `evento.duplicado = true` (idempotente).
+
+**Escada de reentrega (X-Simular-Falha):** tentativas registradas em `t+0,0s` (tentativa 0→1), `t+6,1s` (1→2), `t+21,3s` (2→3), `t+66,8s` (3→DLQ) — correspondendo aos degraus **5 s / 15 s / 45 s**. Pedido terminou em `status=falha`, mensagem na `pedidos.criados.dlq`. Após a leitura, as filas ficaram: `pedidos.criados.dlq` com 1 mensagem pronta (evidência da DLQ) e as demais vazias.
+
+
+## Vazão, múltiplos consumidores e trade-offs (Aula 10)
+
+A Aula 9 provou que o fluxo funciona e mediu **latência**. A Aula 10 mede o que
+faltava: **quanto o pipeline aguenta** e **o que acontece quando se troca
+disponibilidade por latência**.
+
+### Desvio consciente: por que RabbitMQ e não Kafka
+
+A spec da Aula 10 pede Apache Kafka. A implementação segue em **RabbitMQ**, e o
+motivo é o mesmo que validou a Aula 9: a topologia necessária aqui é
+*filas com TTL e dead-letter*, não *log distribuído com retenção*. As
+equivalências são diretas:
+
+| Item pedido (Kafka)                        | O que foi implementado (AMQP 0-9-1)                                       |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| Tópico e partições                         | Exchange `topic` + filas nomeadas (`pedidos.criados`)                     |
+| Retenção/expurgo por tempo                 | `x-message-ttl` nas filas de retry (5/15/45 s)                             |
+| Consumidor com `ack` manual                | `auto_ack=False` + `basic_ack` **depois** do efeito                        |
+| `acks=all` / publisher confirm             | `confirm_delivery()` + `mandatory=True`                                    |
+| Consumer group (partição por consumidor)   | round-robin entre consumers da **mesma** fila                              |
+| Dead letter                                | DLX + fila terminal `pedidos.criados.dlq`                                  |
+| Backoff escalonado                         | escada de filas de retry com TTL, uma por degrau                           |
+
+O que **não** foi fingido: em Kafka o paralelismo de consumo viria de partições
+(várias partições = várias instâncias do mesmo grupo), enquanto aqui ele vem de
+vários consumers na mesma fila. A diferença é que Kafka reordena por chave
+dentro da partição e o RabbitMQ não tem noção de partição — mas para um fluxo
+de **um pedido por mensagem**, os dois modelos entregam a mesma propriedade
+que importa aqui: *N consumidores, cada mensagem para exatamente um deles*.
+
+### Como as medições foram feitas
+
+```powershell
+# com 1 consumidor
+docker compose up -d
+.venv\Scripts\python.exe scripts\measure_messaging.py --purgar --pedidos 20 `
+    --duplicatas 3 --forcar-falha 1 --carga 60 --concorrencia 8 --inspecionar-dlq
+
+# com 3 consumidores concorrentes
+docker compose up -d --scale worker=3
+.venv\Scripts\python.exe scripts\measure_messaging.py --purgar --pedidos 20 `
+    --duplicatas 3 --forcar-falha 1 --carga 60 --concorrencia 8 --inspecionar-dlq
+
+# resumo do log transacional (não precisa da API no ar)
+docker compose logs --no-color worker > logs_worker.jsonl
+.venv\Scripts\python.exe scripts\measure_messaging.py --analisar-logs logs_worker.jsonl
+```
+
+Duas regras metodológicas que mudam o número final:
+
+- **`DRF_USER_RATE` precisa estar no mesmo comando do `docker compose up`.**
+  O `docker-compose.yml` injeta `${DRF_USER_RATE:-100/min}`; sem a variável no
+  ambiente, qualquer `up` posterior recria a API no padrão. Ver "Defeitos de
+  medição encontrados".
+- **A latência é medida por *polling*** (`GET /pedidos/{id}`), com intervalo
+  de 0,2 s no primeiro ciclo. Em fluxo feliz a latência é da ordem de dezenas de
+  milissegundos, ou seja, do mesmo tamanho do intervalo — o número honesto é
+  "dezenas de ms", não o valor exato.
+- **As duas execuções têm que ser encostadas.** As tabelas abaixo vêm de duas
+  rodadas seguidas, com 1 e com 3 consumidores, na mesma sessão. Ver
+  "Por que os números foram medidos de novo, em pares".
+
+### Latência e vazão, com 1 e com 3 consumidores
+
+| Cenário (n = 60, 8 POSTs em paralelo) | 1 consumidor | 3 consumidores |
+| ------------------------------------ | ----------- | -------------- |
+| Publicação (POST → broker confirma)   | 11,46 ped/s | 10,72 ped/s    |
+| Processamento (ponta a ponta)        | 7,23 ped/s  | 7,13 ped/s     |
+| Latência sob carga — média           | 4.549 ms    | 4.720 ms       |
+| Latência sob carga — p50 / p95       | 4.828 / 5.183 ms | 5.072 / 5.566 ms |
+| Latência em repouso (n = 20) — média | 85,9 ms     | 114,8 ms       |
+| POST em repouso — média              | 92,3 ms     | 118,7 ms       |
+| Consumers na fila                    | 1           | 3              |
+
+Fluxo feliz (n = 20): com 1 consumidor, média **85,9 ms** (p50 80 ms, p95 112 ms);
+com 3, média **114,8 ms** (p50 106 ms, p95 178 ms).
+
+**O consumidor extra não melhora nada — ele piora um pouco.** Com 3 consumidores
+a vazão cai de 7,23 para 7,13 ped/s e a latência em repouso sobe de 85,9 para
+114,8 ms. Em repouso a fila está sempre vazia: o pedido é publicado e consumido
+em milissegundos, e colocar mais dois containers nesse caminho só acrescenta
+concorrência de conexão e alguma contenção no banco. Sob carga, a latência vai
+de ~86 ms para ~4,6 s **com 1 ou com 3 consumidores** — o número de POSTs
+concluídos por segundo é o mesmo.
+
+### Por que os números foram medidos de novo, em pares
+
+A primeira rodada desta aula rodou 1 consumidor numa sessão e 3 consumidores em
+outra. Repetir a medição mostrou que **isso não é comparável**: o mesmo código,
+no mesmo host, rendia 9,29 ped/s com 1 consumidor numa sessão e 7,23 ped/s
+noutra — uma variação de ~22% que não tem nada a ver com a mudança de
+arquitetura. Somada à variação de latência (~38%), uma comparação entre
+sessões diferentes teria uma história verosímil e falsa: "3 consumidores deram
++20% de vazão".
+
+Por isso os números da tabela acima vêm de **duas execuções encostadas no mesmo
+minuto, na mesma máquina, com o mesmo tamanho de banco**, e ambas passaram pelo
+contador de 429 (`respostas_429: 0`, `invalido: false`). A lição fica
+registrada de propósito: em benchmark, comparar execuções separadas é o erro
+mais fácil de cometer e o mais difícil de perceber, porque a tabela continua
+bonita.
+
+### Múltiplos consumidores: a distribuição é que prova
+
+Com 3 consumers na mesma fila, a fase de carga (60 mensagens) foi dividida
+exatamente em três:
+
+```json
+"processados_por_worker": {"worker-1": 20, "worker-3": 20, "worker-2": 20}
+```
+
+20 + 20 + 20 = 60. Nenhuma mensagem processada duas vezes, nenhuma perdida: o
+RabbitMQ entrega cada mensagem a **um** consumer (`basic_consume` compete entre
+eles), e o round-robin fica evidente no log. É a propriedade que a
+partição-por-consumidor do Kafka dá, aqui sem precisar de partições.
+
+### Onde está o gargalo (e por que 3 consumidores não ajudaram)
+
+O consumo tem folga de sobra. Do log transacional da fase de carga, com 3
+consumidores (60 mensagens):
+
+| Métrica do log                       | média   | p50    | p95    |
+| ------------------------------------ | ------- | ------ | ------ |
+| `duracao_ms` (trabalho no consumidor) | 12,9 ms | 10,9 ms | 27,6 ms |
+| `atraso_fila_ms` (espera na fila)     | 23,6 ms | 20 ms   | 29 ms   |
+
+Ou seja: **cada mensagem consome ~13 ms de trabalho e espera ~24 ms na fila**.
+Um consumer sozinho teria capacidade de ~1/0,013 s ≈ **77 mensagens/s**, e os
+3 juntos dariam ~230/s — muito acima dos ~7/s medidos. A fila nunca chega a
+acumular (`atraso_fila_ms` p95 = 29 ms), então os consumidores não estão
+saturados.
+
+> O `n` do `atraso_fila_ms` no relatório do `--analisar-logs` é 120 para 60
+> mensagens: o campo aparece em duas linhas de log por mensagem
+> (`MensagemRecebida` e `PedidoProcessado`) e o analisador agrega as duas. O
+> valor por mensagem é o mesmo, então os percentis não mudam.
+
+O limite está **antes**, na publicação. Do log da API (as duas rodadas
+pareadas):
+
+| Métrica da API                            | valor        |
+| ----------------------------------------- | ------------ |
+| `PedidoPublicado.duracao_ms`               | p50 **29,8 ms** (p95 70,4 ms) |
+| `TopologiaDeclarada` por publicação        | **1 para 1** (164 publicações = 164 declarações) |
+
+Cada `POST /pedidos/` **abre uma conexão AMQP nova e redeclara a topologia
+inteira** (3 exchanges + 5 filas) antes de publicar. O cliente único da
+medição (8 threads, `urllib` bloqueante) satura em ~11 POSTs/s, e é esse o
+teto do experimento:
+
+| Concorrência do cliente | POSTs/s | latência média do POST |
+| ----------------------- | ------- | ---------------------- |
+| 8                       | 10,7    | 707 ms                 |
+| 24                      | 10,0    | 1.849 ms               |
+
+Triplicar a concorrência **não** aumentou a vazão e apenas empurrou a latência
+do POST para cima — a assinatura clássica de um recurso saturado mais acima.
+Conclusão honesta: **o gargalo desta arquitetura é o produtor, não o
+consumidor.** A correção é o equivalente AMQP do *producer pooling* que a spec
+pede para o Kafka: uma conexão/canal compartilhado por processo, topologia
+declarada uma vez no startup, `confirm_delivery` já ligado. Isso é trabalho de
+uma aula seguinte — aqui fica medido e diagnosticado, não "adicionado e
+comemorado".
+
+### Idempotência × latência × throughput
+
+Os três requisitos puxam em direções opostas, e o desenho escolhe posição:
+
+| Decisão                                | Ganho                                        | Custo                                        |
+| -------------------------------------- | -------------------------------------------- | -------------------------------------------- |
+| Dedupe no Redis antes do efeito        | evita transação e `UPDATE` no banco         | 1 ida e volta ao Redis por mensagem (~1 ms)  |
+| Dedupe **só** no banco (`UPDATE` cond.)| dispensa o Redis no caminho crítico          | transação no banco para toda mensagem         |
+| Backoff 5/15/45 s em filas             | não trava a fila com retentativa             | falha terminal demora ~65 s para ser visível |
+| `prefetch_count=1`                     | processamento por mensagem isolado           | 1 consumer só processa 1 por vez             |
+| Confirmação do produtor                | nenhum 201 "fantasma"                        | POST espera o disco do broker (~30 ms)        |
+
+O que a medição mostra é que **a idempotência é barata** (uma ida e volta ao
+Redis, ~1 ms de um total de ~13 ms de trabalho no consumidor) e que **o custo
+real da consistência está em esperar o resultado durável antes de responder
+201** — se a API respondesse antes do confirm, o POST cairia de ~30 ms (p50 do
+`PedidoPublicado.duracao_ms`) para ~1 ms e o cliente passaria a correr o risco
+de um pedido que nunca existiu.
+
+### Dedupe fail-open: Redis fora do ar
+
+Com `docker compose stop redis`, e o pipeline inteiro ainda funcionando:
+
+| Métrica                        | Redis no ar | Redis fora do ar |
+| ------------------------------ | ----------- | ---------------- |
+| Pedidos processados            | 10/10       | 10/10            |
+| Latência média                 | ~70 ms      | **3.437 ms**     |
+| Idempotência (3 reenvios)      | 200, mesmo id | 200, mesmo id   |
+| Eventos de degradação          | —           | `DedupeDegradado`, `DedupeNaoConfirmado` |
+
+O comportamento é o desejado: **a janela do Redis é otimização, o banco é a
+autoridade**. Com o Redis fora, o consumidor registra
+`DedupeDegradado: "fail-open: o UPDATE condicional no banco continua
+garantindo o efeito único"` e segue; o `UPDATE` condicional do PostgreSQL
+continua impede qualquer efeito duplicado (os 3 reenvios devolveram o mesmo
+pedido, sem novo evento). O preço é a **latência**: cada mensagem espera o
+time-out do Redis (resolução de nome, ~1,7 s, duas vezes por mensagem) antes de
+seguir. Fail-open compra disponibilidade ao preço da latência — que é
+exatamente a escolha que a spec pedia para medir.
+
+> O experimento acima é anterior ao contador `dedupe_degradado`, então a
+> evidência dele são os eventos de log. Hoje a mesma degradação também aparece
+> como número no snapshot do `WorkerEncerrado` — dá para responder "quantas
+> vezes a janela não pôde ser usada" sem contar warnings.
+
+### At-least-once: worker morto no meio
+
+Teste de caos: uma carga em andamento e os **3 containers `worker` levados com
+`SIGKILL`** (`docker compose kill worker`), sem chance de requeue orderly, e
+depois religados:
+
+| Execução            | Publicados | Processados | Não processados | DLQ | Filas no fim |
+| ------------------- | ---------- | ----------- | --------------- | --- | ------------ |
+| 60 pedidos, conc. 8 | 60         | 60          | 0               | 0   | todas vazias |
+
+**Nenhuma mensagem perdida.** É a propriedade que importa no ack manual: a
+confirmação é enviada **depois** do efeito (`dedupe.confirmar()` e só então
+`basic_ack()`), então uma queda de conexão entrega a mensagem de novo em vez de
+fingir que ela sumiu. O reprocessamento é seguro porque as duas barreiras de
+idempotência descritas acima.
+
+O que **não** foi reproduzido: uma duplicata de verdade. A janela entre
+"efeito confirmado no banco" e "`basic_ack`" é de sub-milissegundo, então o
+SIGKILL raramente cai dentro dela — nos testes o `SIGKILL` pegou a fila já
+drenada. Para provar a duplicata de forma determinística seria preciso um ponto
+de injeção de falha (algo como `X-Simular-Quase-ack`, que derruba o processo
+entre o commit e o ack). O que se pode afirmar com a evidência coletada é a
+ausência de perda; o caminho de duplicata está implementado e logado
+(`PedidoDuplicado`), mas sua reprodução exige essa flag.
+
+### Logs transacionais
+
+O consumer e o produtor emitem **um JSON por evento** (logger `core.messaging`),
+com campos estruturados que tornam a análise uma agregação, não um `grep`:
+
+```json
+{"timestamp": "2026-10-01T16:07:41.882Z", "level": "INFO", "logger": "core.messaging",
+ "evento": "PedidoProcessado", "resultado": "ok", "evento_id": "574b5cd4-...",
+ "chave_idempotencia": "aula10-carga-1790873-14", "pedido_id": 336,
+ "fila": "pedidos.criados", "tentativa": 0, "atraso_fila_ms": 17.0, "duracao_ms": 8.87,
+ "mensagem": "pedido processado"}
+{"timestamp": "...", "level": "WARNING", "logger": "core.messaging",
+ "evento": "DedupeDegradado", "resultado": "erro",
+ "motivo": "fail-open: o UPDATE condicional no banco continua garantindo o efeito único",
+ "erro": "ConnectionError: Error -2 connecting to redis:6379. Name or service not known.",
+ "mensagem": "janela de deduplicação indisponível; seguindo sem ela"}
+```
+
+`--analisar-logs` agrega o arquivo em contagem de eventos, distribuição de
+`duracao_ms`/`atraso_fila_ms` e trabalho por instância (é o que produz o
+20/20/20 acima). O pacote de mensageria emite **21 tipos de evento**, e a lista
+foi conferida contra o código (não é contagem de memória):
+
+| Grupo                | Eventos                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------ |
+| Ciclo da mensagem    | `MensagemRecebida`, `MensagemEncerrada`, `PedidoProcessado`, `PedidoDuplicado`, `PedidoFalha`, `PedidoDlq` |
+| Publicação           | `PedidoPublicado`, `PedidoPublicacaoFalhou`, `TopologiaDeclarada`                                   |
+| Falha de política    | `ReentregaFalhou`, `DlqFalhou`, `PoliticaInconsistente`                                            |
+| Dedupe               | `DedupeDegradado`, `DedupeNaoConfirmado`, `DedupeNaoLiberado`                                       |
+| Ciclo de vida worker | `WorkerIniciado`, `WorkerEncerrado`, `WorkerInterrompido`, `WorkerLimiteAtingido`, `WorkerParando`, `WorkerSemConexao` |
+
+`PedidoCriado` **não** aparece nessa lista: é o nome do contrato
+(`contracts.EVENTO_PEDIDO_CRIADO`), não um evento de log — o evento de
+publicação que o produtor emite é `PedidoPublicado`.
+
+### Defeitos de medição encontrados (e corrigidos)
+
+Os três maiores problemas desta aula não foram no sistema de mensageria — foram
+**no próprio instrumento de medição**, e vale registrá-los porque é o que
+transforma um relatório em evidência:
+
+1. **A API grava `falha` antes de publicar na DLQ.** A medição original usava
+   `sleep(2)` entre "API disse `falha`" e "ler as filas". Capturado com
+   snapshots finos, o instante do `falha` é `t+68,1s` com `DLQ=0, retry.3=1` — a
+   mensagem ainda estava na última fila de retry. Com o sleep, o relatório ora
+   diria `dlq=0`, ora `dlq=1`. **Corrigido**: `aguardar_mensagem_na_dlq()`
+   pergunta ao broker até a mensagem aparecer, e reporta quanto esperou
+   (1,04 s e 1,55 s nas rodadas pareadas de 3 e 1 consumidor).
+2. **Throttling absorvido em silêncio.** O `docker compose up --scale worker=3`
+   recriou a API com `DRF_USER_RATE` no padrão (100/min) porque a variável não
+   existia naquele shell. 11 respostas 429 (18 s de espera cada) empurraram a
+   latência média da carga para **53 s**, contra ~4,5 s na rodada limpa — e o
+   relatório saía limpo e bonito. **Corrigido**: todo 429 é contado, e a
+   execução sai com código 1 e um aviso se passar de `--tolerar-429` (padrão 0).
+3. **`RemoteDisconnected` não é `URLError`.** Derrubar a API no meio da carga
+   (o próprio teste de caos) matava o harness com traceback. **Corrigido**:
+   `OSError`/`http.client.HTTPException` entram na mesma fila de retentativa,
+   em contador separado do 429 (indisponibilidade é esperada no teste de caos e
+   não invalida a medição).
+4. **Comparar execuções de sessões diferentes.** Detalhado em "Por que os
+   números foram medidos de novo, em pares": o mesmo código rendeu 9,29 e 7,23
+   ped/s em duas rodadas de 1 consumidor, e a comparação entre sessões teria
+   inventado um ganho de vazão com 3 consumidores que não existe. **Corrigido**:
+   as duas colunas da tabela vêm de rodadas encostadas, e ambas reportam
+   `respostas_429: 0`.
+
+### Comandos úteis (Aulas 9 e 10)
+
+```powershell
+# Verificar topologia e logs do worker
+docker compose logs -f worker
+
+# Escalar consumidores (o service não tem container_name de propósito)
+docker compose up -d --scale worker=3
+
+# Recuperar pedidos em pendente_publicacao
+docker compose exec api python api/manage.py republicar_pedidos --dry-run
+docker compose exec api python api/manage.py republicar_pedidos
+
+# Medição completa (latência, idempotência, vazão, DLQ, consumidores)
+.venv\Scripts\python.exe scripts\measure_messaging.py --purgar --pedidos 20 `
+    --duplicatas 3 --forcar-falha 1 --carga 60 --concorrencia 8 --inspecionar-dlq
+
+# Só a vazão, sem esperar a escada de reentrega (~65 s)
+.venv\Scripts\python.exe scripts\measure_messaging.py --purgar --pedidos 0 `
+    --duplicatas 0 --forcar-falha 0 --carga 60 --concorrencia 8
+
+# Resumo do log transacional
+docker compose logs --no-color worker > logs_worker.jsonl
+.venv\Scripts\python.exe scripts\measure_messaging.py --analisar-logs logs_worker.jsonl
+
+# Dedupe degradado (fail-open)
+docker compose stop redis
+.venv\Scripts\python.exe scripts\measure_messaging.py --purgar --pedidos 10 --duplicatas 3
+docker compose start redis
+```
+
+> Nota: o throttle é irrelevante para quem não mede, então **não** se elevou
+> `DRF_USER_RATE` no `docker-compose.yml` — a medição eleva por variável de
+> ambiente, no mesmo comando do `up`, e o harness se recusa a publicar números
+> contaminados por 429.
+
+
 ## Referências
 
 - [Histórico de uso de IA generativa](PROMPTS.md)
