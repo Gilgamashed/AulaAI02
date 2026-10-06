@@ -2,7 +2,7 @@ from django.db.models import Avg, Count, Max, Min
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
-from .models import Category, Item, Pedido, validate_sku
+from .models import Category, Item, Notificacao, Pagamento, Pedido, validate_sku
 
 
 def _strip_required(value, label):
@@ -246,5 +246,123 @@ class PedidoSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "processado_em",
+        ]
+        read_only_fields = fields
+
+
+# =====================================================================
+# Aula 11 — Pagamento e Notificacao
+# =====================================================================
+
+
+class PagamentoSimularSerializer(serializers.Serializer):
+    """Entrada do `POST /api/v1/pedidos/{id}/pagamento/`.
+
+    Só o que o **cliente decide** entra aqui, e são duas coisas: o método e o
+    desfecho que o gateway deve responder.
+
+    `aprovado` e `motivo_recusa` são a simulação do gateway. Mandá-los no request
+    é o que torna a aula demonstrável sem um provedor de verdade: sem eles, o
+    único desfecho possível seria "aprovado", e a metade interessante do fluxo
+    (recusa, notificação de recusa, re-POST idempotente de um pagamento já
+    recusado) ficaria fora da prova.
+
+    `canal` é a escolha de onde o cliente quer ser avisado. Não é coluna do
+    `Pagamento`: vive no evento e é copiado para a `Notificacao` pelo worker,
+    porque quem **cria** a notificação é o worker, e é ele que precisa do canal.
+    """
+
+    metodo = serializers.ChoiceField(choices=Pagamento.METODO_CHOICES)
+    aprovado = serializers.BooleanField(
+        default=True,
+        help_text="Desfecho que o gateway simulado deve responder.",
+    )
+    motivo_recusa = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=200,
+        default="",
+        help_text="Obrigatório quando 'aprovado' for false.",
+    )
+    canal = serializers.ChoiceField(
+        choices=Notificacao.CANAL_CHOICES,
+        default=Notificacao.CANAL_EMAIL,
+        required=False,
+    )
+
+    def validate(self, attrs):
+        """A recusa é um estado consistente, não um texto opcional.
+
+        Mesma regra do contrato `PagamentoRegistrado` (ver
+        `contracts.validar_pagamento_registrado`), aplicada já na entrada: é
+        melhor um 400 explicando o que falta do que um evento que o worker
+        rejeitaria como DLQ por algo que o cliente podia ter lido.
+        """
+        if not attrs["aprovado"] and not (attrs.get("motivo_recusa") or "").strip():
+            raise serializers.ValidationError(
+                {
+                    "motivo_recusa": (
+                        "Obrigatório quando 'aprovado' for false: sem motivo não há "
+                        "o que notificar ao cliente."
+                    )
+                }
+            )
+        if attrs["aprovado"] and (attrs.get("motivo_recusa") or "").strip():
+            raise serializers.ValidationError(
+                {
+                    "motivo_recusa": (
+                        "Não faz sentido com 'aprovado' true — o desfecho e o "
+                        "motivo precisam concordar."
+                    )
+                }
+            )
+        return attrs
+
+
+class PagamentoSerializer(serializers.ModelSerializer):
+    """Leitura do pagamento, já com o desfecho que o worker persistiu."""
+
+    usuario = serializers.CharField(source="pedido.usuario.username", read_only=True)
+
+    class Meta:
+        model = Pagamento
+        fields = [
+            "id",
+            "pedido_id",
+            "usuario",
+            "metodo",
+            "valor",
+            "transacao_id",
+            "aprovado",
+            "motivo_recusa",
+            "status",
+            "idempotency_key",
+            "tentativas",
+            "motivo_falha",
+            "notificado_em",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class NotificacaoSerializer(serializers.ModelSerializer):
+    """Leitura da notificação.
+
+    `pedido_id` vem do FK desnormalizado, e `pagamento_id` permite voltar ao
+    pagamento que a originou — é o que o `GET /notificacoes/` precisa mostrar
+    para o cliente entender *qual* das cobranças foi avisada.
+    """
+
+    class Meta:
+        model = Notificacao
+        fields = [
+            "id",
+            "pedido_id",
+            "pagamento_id",
+            "canal",
+            "titulo",
+            "mensagem",
+            "enviada_em",
         ]
         read_only_fields = fields

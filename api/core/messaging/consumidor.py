@@ -49,7 +49,7 @@ from django.utils import timezone
 
 from .. import models
 from . import dedupe
-from .contracts import ContratoInvalido, PedidoCriado, validar_evento
+from .contracts import ContratoInvalido, PedidoCriado, validar_pedido_criado
 from .erros import descrever
 from .metricas import DLQ, DUPLICADO, FALHA, PROCESSADO, mensageria_metrics
 from .produtor import com_tentativa, republicar
@@ -119,6 +119,14 @@ class Consumidor:
         if self._topologia is None:
             raise RuntimeError("topologia ainda não declarada: o worker não está consumindo")
         return self._topologia
+
+    def descricao_destino(self) -> str:
+        """Texto do destino, para o console do management command.
+
+        Existe para que `consumir_pedidos` sirva aos dois brokers com o mesmo
+        código: cada consumidor sabe descrever a si próprio.
+        """
+        return f"a fila AMQP '{self.fila}'"
 
     # ------------------------------------------------------------------
     # Ciclo de vida
@@ -389,11 +397,19 @@ class Consumidor:
 
     @staticmethod
     def _validar(corpo: bytes) -> PedidoCriado:
+        """Valida contra o contrato **do fluxo de pedidos**.
+
+        Validador explícito (`validar_pedido_criado`), e não o despachante
+        `validar`: o RabbitMQ desta base só transporta `PedidoCriado`, então
+        qualquer outro tipo de evento aqui é um payload inesperado e precisa
+        falhar no contrato — com o despachante, ele passaria pela validação e
+        só cairia no efeito, depois de já ter passado pela janela de dedupe.
+        """
         try:
             bruto = json.loads(corpo.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as erro:
             raise ContratoInvalido(f"corpo não é JSON UTF-8 válido: {erro}") from erro
-        return validar_evento(bruto)
+        return validar_pedido_criado(bruto)
 
     def _aplicar_efeito(self, evento: PedidoCriado, tentativa: int) -> bool:
         """Aplica o estado do pedido. Devolve `True` se o efeito foi aplicado.

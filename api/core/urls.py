@@ -11,6 +11,7 @@ from .views import (
     CacheMetricsView,
     CategoryViewSet,
     ItemViewSet,
+    NotificacaoViewSet,
     PedidoViewSet,
 )
 
@@ -43,6 +44,12 @@ router.register("items", ItemViewSet, basename="item")
 # detalhe) exige autenticação e, fora do papel admin, só mostra os próprios
 # pedidos — ver `PedidoViewSet.get_queryset`.
 router.register("pedidos", PedidoViewSet, basename="pedido")
+
+# Aula 11: as notificações que o `worker-pagamentos` criou. Recurso de **leitura
+# só** (`ReadOnlyModelViewSet`): a notificação é efeito do evento, e nada na API
+# a cria — criá-la aqui permitiria uma notificação sem pagamento, que é
+# exatamente o que o `OneToOne` existe para impedir.
+router.register("notificacoes", NotificacaoViewSet, basename="notificacao")
 
 # Rotas de autenticação JWT (SimpleJWT) sob o prefixo /api/v1/auth/.
 urlpatterns = [

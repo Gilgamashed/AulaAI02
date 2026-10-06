@@ -1,4 +1,4 @@
-"""Utilitários de logging das Aulas 8 (cache-aside) e 9 (mensageria).
+"""Utilitários de logging das Aulas 8 (cache-aside), 9 (RabbitMQ) e 10 (Kafka).
 
 O logger `core.cache` (configurado em `config/settings.py`) emite **uma linha
 JSON por evento** de cache. O logger `core.messaging` faz o mesmo pelos
@@ -15,6 +15,13 @@ objetivo é duplo:
 
 Registro em log **estruturado** significa que o dado é separado por campos
 nomeados, não concatenado em texto livre — é o que permite agregá-lo depois.
+
+Sobre a Aula 10: os nomes de evento (`PedidoPublicado`, `PedidoProcessado`,
+`PedidoFalha`, `PedidoDlq`, `PedidoDuplicado`, `MensagemRecebida`) são os
+**mesmos** dos dois brokers, e `broker` distingue a linha. É essa escolha que
+permite comparar as duas execuções com o mesmo filtro de log
+(`"evento": "PedidoProcessado"`) e que faz o `--analisar-logs` do
+`measure_messaging.py` funcionar sem nenhum ramo por broker.
 """
 
 import json
@@ -44,11 +51,40 @@ CAMPOS_EVENTO = (
     "evento_id",
     "chave_idempotencia",
     "pedido_id",
+    # Aula 11 (segundo fluxo): com dois fluxos no mesmo broker, `pedido_id` sozinho
+    # não identifica a entidade do log — um pagamento e um pedido do mesmo
+    # número existem. `pagamento_id` é o par que fecha a identificação, e
+    # `fluxo` diz de qual dos dois streams a linha veio (é também o que permite
+    # filtrar `worker-kafka` e `worker-pagamentos` com o mesmo `grep`).
+    "pagamento_id",
+    "fluxo",
     "tentativa",
     "atraso_fila_ms",
     "duracao_ms",
+    # Aula 10 (replayer): o tempo entre `resume()` da partição e a mensagem
+    # voltar a ser entregue. É o que separa o backoff **declarado** do
+    # backoff **pago** — o laço do replayer visita os degraus em sequência, e
+    # essa espera é o que falta para acrescentar a 45 s do degrau 3.
+    "espera_ms",
+    # `idade_ms` é o **par** de `duracao_ms` no log de espera do replayer: já
+    # passou este tempo desde a reentrega. Sem ele, o `RetryAguardando` dizia
+    # quanto faltava mas não quanto já tinha custado, e os dois juntos são o que
+    # fecha a conta do backoff declarado contra o pago.
+    "idade_ms",
     "fila",
     "erro",
+    # Aula 10 (Kafka): coordenadas do log no espaço do log distribuído. Com
+    # broker + tópico + partição + offset, qualquer linha pode ser reencontrada
+    # no histórico (é literalmente um `kafka-console-consumer --offset`), e
+    # `grupo` diz quem lia o que — as três perguntas que o `fila` sozinha
+    # (equivalente AMQP) não responde. `destino` aparece no log do replayer,
+    # onde a informação que importa é para onde a mensagem foi devolvida.
+    "broker",
+    "topico",
+    "particao",
+    "offset",
+    "grupo",
+    "destino",
 )
 
 

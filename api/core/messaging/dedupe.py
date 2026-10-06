@@ -1,20 +1,32 @@
-"""Janela de idempotência da Aula 9 (Redis `SET NX EX`).
+"""Janela de idempotência (Redis `SET NX EX`), comum aos dois fluxos.
 
-Uma fila entrega **pelo menos uma vez**: o mesmo `PedidoCriado` pode chegar
-duas vezes (reentrega após falha, reconexão do worker, republicação manual).
-O objetivo aqui é simples: a segunda cópia é reconhecida e descartada sem
+Uma fila entrega **pelo menos uma vez**: a mesma mensagem pode chegar duas
+vezes (reentrega após falha, reconexão do worker, republicação manual). O
+objetivo aqui é simples: a segunda cópia é reconhecida e descartada sem
 reaplicar o efeito.
 
 Por que Redis e não só o banco
------------------------------
+------------------------------
 A spec pede "chave de deduplicação com prazo de validade (TTL)". O Redis dá
 isso nativo (`SET ... EX`) e em uma operação atômica; no banco, um TTL
 exigiria uma rotina de expurgo. Mas o Redis, sozinho, **não** garante a
 idempotência do efeito — ele só filtra a maioria das duplicatas. A garantia
 real está no `UPDATE` condicional do consumidor
-(`Pedido.objects.filter(pk=..., status=PENDENTE).update(...)`): se a chave
-sumiu (TTL expirou, Redis reiniciou) mas o pedido já foi processado, o banco
-impede o efeito duplicado. São duas camadas de propósito.
+(`Pedido.objects.filter(pk=..., status=PENDENTE).update(...)` e o
+`Pagamento.objects.filter(pk=..., notificado_em__isnull=True).update(...)`): se
+a chave sumiu (TTL expirou, Redis reiniciou) mas o efeito já aconteceu, o banco
+impede a repetição. São duas camadas de propósito.
+
+Uma janela, dois fluxos
+-----------------------
+`PedidoCriado` (fluxo `pedidos`) e `PagamentoRegistrado` (fluxo `pagamentos`)
+usam a **mesma** janela, e é por isso que a chave carrega o nome do fluxo
+(`contracts.PedidoCriado.chave_dedupe`). Os dois eventos compartilham a
+`envelope` — inclusive o campo `idempotency_key`, que é um SHA-256 de 64 hex.
+Sem o prefixo, a janela trataria um pagamento como duplicata do pedido a que ele
+pertence, e o cliente nunca receberia a notificação. O prefixo é o que separa as
+duas perguntas: "este pedido já foi processado?" e "este pagamento já foi
+notificado?".
 
 Ciclo de vida da chave
 ----------------------
@@ -24,7 +36,7 @@ Ciclo de vida da chave
 
 A liberação no caminho da falha é o detalhe que costuma faltar: sem ela, a
 primeira tentativa marcaria a chave e todas as reentregas seriam tratadas
-como duplicata — o pedido nunca sairia da fila.
+como duplicata — o pagamento nunca sairia da fila.
 
 Toda degradação (backend ausente, Redis fora, falha ao confirmar ou liberar)
 conta em `mensageria_metrics.dedupe_degradado`, que aparece no snapshot do
@@ -40,7 +52,7 @@ from django.conf import settings
 from django.core.cache import InvalidCacheBackendError, caches
 from django.core.cache.backends.base import BaseCache
 
-from .contracts import PedidoCriado
+from .contracts import Evento
 from .erros import descrever
 from .metricas import mensageria_metrics
 
@@ -48,7 +60,7 @@ logger = logging.getLogger("core.messaging")
 
 # Alias do cache: aponta para o db 0 do Redis (ver settings.CACHES).
 DEDUPE = "dedupe"
-PREFIXO_CHAVE = "pedido:idempotencia"
+PREFIXO_CHAVE = "mensageria:idempotencia"
 
 
 def _janela() -> BaseCache | None:
@@ -57,7 +69,7 @@ def _janela() -> BaseCache | None:
     O `None` só acontece se alguém rodar a view ou o consumidor com uma
     configuração de settings sem o alias (ex.: um settings mínimo de teste).
     O consumidor trata isso como dedupe indisponível (fail-open), igual ao
-    caso de o Redis estar fora do ar.
+    caso do Redis estar fora do ar.
     """
     try:
         return caches[DEDUPE]
@@ -65,27 +77,29 @@ def _janela() -> BaseCache | None:
         return None
 
 
-def _chave_cache(idempotency_key: str) -> str:
-    """Chave real no Redis: `synapseshop:0:pedido:idempotencia:<chave>`.
+def _chave_cache(evento: Evento) -> str:
+    """Chave real no Redis: `synapseshop:0:mensageria:idempotencia:<fluxo>:<chave>`.
 
-    A chave de idempotência entra **crua**, sem passar por SHA-256: ela já é
-    um hex de 64 caracteres quando o produtor a calcula
-    (`views._chave_idempotencia`), e quando vem do header do cliente passa
-    por SHA-256 antes de chegar aqui (`CharField(max_length=64)`). Ou seja,
-    hashear de novo não acrescentaria nada e só custaria uma passada de CPU
-    por mensagem. O prefixo do backend (`synapseshop:0:`) vem do próprio
-    Django, então o que tooling precisar casar é só o sufixo
-    `pedido:idempotencia:<chave>`.
+    A chave de idempotência entra **crua**, sem passar por SHA-256: ela já é um
+    hex de 64 caracteres quando o produtor a calcula
+    (`views._chave_idempotencia`), e quando vem do header do cliente passa por
+    SHA-256 antes de chegar aqui (`CharField(max_length=64)`). Ou seja, hashear
+    de novo não acrescentaria nada e só custaria uma passada de CPU por
+    mensagem. O prefixo do backend (`synapseshop:0:`) vem do próprio Django,
+    então o que tooling precisar casar é o sufixo
+    `mensageria:idempotencia:<fluxo>:<chave>` — e o `<fluxo>` é
+    `pedidos`/`pagamentos`, o que torna a auditoria trivial
+    (`redis-cli -n 0 keys 'mensageria:idempotencia:pagamentos:*'`).
     """
-    return f"{PREFIXO_CHAVE}:{idempotency_key}"
+    return f"{PREFIXO_CHAVE}:{evento.chave_dedupe()}"
 
 
-def reservar(evento: PedidoCriado) -> bool:
+def reservar(evento: Evento) -> bool:
     """Tenta reservar a janela. `True` = primeira vez; `False` = duplicata.
 
     `SET NX` é atômico no Redis: dois workers recebendo a mesma mensagem ao
-    mesmo tempo disputam a chave e apenas um ganha. Essa corrida é a razão
-    de a operação ser `NX` e não `GET` seguido de `SET`.
+    mesmo tempo disputam a chave e apenas um ganha. Essa corrida é a razão de a
+    operação ser `NX` e não `GET` seguido de `SET`.
 
     Em falha de conexão, devolve `True` (**fail-open**): o worker processa a
     mensagem e o `UPDATE` condicional no banco evita o efeito duplicado. A
@@ -98,13 +112,13 @@ def reservar(evento: PedidoCriado) -> bool:
         _degradado(evento, "backend de deduplicação não configurado")
         return True
     try:
-        return bool(janela.add(_chave_cache(evento.idempotency_key), evento.pedido_id))
+        return bool(janela.add(_chave_cache(evento), evento.pedido_id))
     except Exception as erro:  # noqa: BLE001 - qualquer falha do cache degrada
         _degradado(evento, descrever(erro))
         return True
 
 
-def confirmar(evento: PedidoCriado) -> None:
+def confirmar(evento: Evento) -> None:
     """Marca a janela como consumida com sucesso.
 
     Reescreve a chave com o TTL cheio em vez de apenas deixá-la: o prazo da
@@ -115,7 +129,7 @@ def confirmar(evento: PedidoCriado) -> None:
     _operacao(
         evento,
         lambda janela: janela.set(
-            _chave_cache(evento.idempotency_key),
+            _chave_cache(evento),
             evento.pedido_id,
             settings.DEDUPE_TTL_SEGUNDOS,
         ),
@@ -124,7 +138,7 @@ def confirmar(evento: PedidoCriado) -> None:
     )
 
 
-def liberar(evento: PedidoCriado) -> None:
+def liberar(evento: Evento) -> None:
     """Libera a janela para que a reentrega possa reprocessar.
 
     Chamado em TODO caminho de falha. Sem esta liberação, a primeira tentativa
@@ -133,20 +147,21 @@ def liberar(evento: PedidoCriado) -> None:
     """
     _operacao(
         evento,
-        lambda janela: janela.delete(_chave_cache(evento.idempotency_key)),
+        lambda janela: janela.delete(_chave_cache(evento)),
         "não foi possível liberar a janela de deduplicação",
         "DedupeNaoLiberado",
     )
 
 
-def _operacao(evento: PedidoCriado, acao, mensagem_log: str, evento_log: str) -> None:
+def _operacao(evento: Evento, acao, mensagem_log: str, evento_log: str) -> None:
     """Executa uma escrita na janela, degradando em silêncio se falhar.
 
     `confirmar`/`liberar` nunca devem derrubar o processamento: se o Redis
     falhar ao confirmar, a garantia de idempotência restante é o `UPDATE`
     condicional no banco; se falhar ao liberar, o efeito colateral é a chave
-    reservada sobreviver até o TTL — e o pedido, cujo status já é
-    `processado`, protege a si mesmo de qualquer forma.
+    reservada sobreviver até o TTL — e o pedido, cujo status já é `processado`
+    (e o pagamento, cujo `notificado_em` já foi gravado), protegem a si mesmos de
+    qualquer forma.
     """
     janela = _janela()
     if janela is None:
@@ -165,6 +180,7 @@ def _operacao(evento: PedidoCriado, acao, mensagem_log: str, evento_log: str) ->
             extra={
                 "evento": evento_log,
                 "resultado": "erro",
+                "fluxo": evento.fluxo,
                 "chave_idempotencia": evento.idempotency_key,
                 "pedido_id": evento.pedido_id,
                 "erro": descrever(erro),
@@ -172,7 +188,7 @@ def _operacao(evento: PedidoCriado, acao, mensagem_log: str, evento_log: str) ->
         )
 
 
-def _degradado(evento: PedidoCriado, erro: str) -> None:
+def _degradado(evento: Evento, erro: str) -> None:
     """Registra que a janela de idempotência não pôde ser usada."""
     mensageria_metrics.record_degradacao()
     logger.warning(
@@ -180,6 +196,7 @@ def _degradado(evento: PedidoCriado, erro: str) -> None:
         extra={
             "evento": "DedupeDegradado",
             "resultado": "erro",
+            "fluxo": evento.fluxo,
             "chave_idempotencia": evento.idempotency_key,
             "pedido_id": evento.pedido_id,
             "erro": erro,

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import uuid
 from decimal import Decimal
 from typing import Any
 
@@ -16,20 +17,43 @@ from rest_framework.views import APIView
 from . import cache as cache_api
 from .cache_metrics import cache_metrics
 from .filters import ItemFilter
-from .messaging import produtor
-from .models import Category, Item, Pedido
+from .messaging import broker as mensageria
+from .models import Category, Item, Notificacao, Pagamento, Pedido
 from .permissions import IsAdminRole
 from .serializers import (
     CategorySerializer,
     ItemDetalheSerializer,
     ItemSerializer,
+    NotificacaoSerializer,
+    PagamentoSerializer,
+    PagamentoSimularSerializer,
     PedidoCreateSerializer,
     PedidoSerializer,
 )
 
 
 def health(request):
-    return JsonResponse({"status": "ok", "service": "synapseshop-api"})
+    # Aula 10: o broker ativo entra no health para que "qual mensageria está no
+    # ar?" seja respondida por uma chamada, sem precisar ler o log nem inferir
+    # do compose. `MENSAGERIA_BROKER` aparece cru de propósito: se alguém
+    # digitou `KAFKA` (maiúsculo) ou `kakfa`, o valor bruto entrega o erro de
+    # configuração enquanto `broker` mostra o fallback efetivamente usado.
+    bruto = str(getattr(settings, "MENSAGERIA_BROKER", "")).strip().lower()
+    return JsonResponse(
+        {
+            "status": "ok",
+            "service": "synapseshop-api",
+            "broker": mensageria.broker_ativo(),
+            "MENSAGERIA_BROKER": bruto,
+            # Aula 11: com dois fluxos, "qual mensageria está no ar?" não basta
+            # para responder "o worker de pagamento está consumindo o tópico
+            # certo?". `mensageria.resumo()` traz os dois fluxos com tópico,
+            # grupo e DLQ de cada um.
+            "fluxos": (mensageria.resumo().get("fluxos") or {})
+            if mensageria.broker_ativo() == mensageria.KAFKA
+            else None,
+        }
+    )
 
 
 # =====================================================================
@@ -288,6 +312,33 @@ def _chave_idempotencia(
     return hashlib.sha256(canonico.encode("utf-8")).hexdigest()
 
 
+def _chave_pagamento(pedido_id: int, metodo: str, aprovado: bool) -> str:
+    """Resolve a chave de idempotência do pagamento (64 hex, sha256).
+
+    O header `Idempotency-Key` **não** entra aqui, e a diferença em relação ao
+    pedido é deliberada: um pagamento é uma tentativa específica de
+    (pedido, método, desfecho). Reenviar o mesmo POST precisa ser reconhecido
+    como repetição — mas o header do cliente não sabe o desfecho que o gateway
+    vai devolver, então usá-lo faria a chave depender de algo que o próprio POST
+    ainda não decidiu. A chave vem do servidor, do conteúdo da tentativa.
+
+    `canal_notificacao` fica de fora de propósito: notificar por SMS e por e-mail
+    é a **mesma** cobrança, e o canal é escolha de entrega, não identidade do
+    fato. Incluí-lo faria um re-POST com canal diferente parecer um pagamento
+    diferente.
+    """
+    canonico = json.dumps(
+        {
+            "pedido_id": pedido_id,
+            "metodo": metodo,
+            "aprovado": bool(aprovado),
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonico.encode("utf-8")).hexdigest()
+
+
 class PedidoViewSet(viewsets.ModelViewSet):
     """Pedidos: o POST publica `PedidoCriado`; o worker avança o estado.
 
@@ -442,8 +493,8 @@ class PedidoViewSet(viewsets.ModelViewSet):
     def _publicar(pedido: Pedido, chave: str, publicacao: dict, erro: list) -> None:
         """Publica o evento e registra o desfecho em `publicacao`/`erro`."""
         try:
-            publicacao.update(produtor.publicar_pedido_criado(pedido, chave))
-        except produtor.PublicacaoFalhou as excecao:
+            publicacao.update(mensageria.publicar_pedido_criado(pedido, chave))
+        except mensageria.PublicacaoFalhou as excecao:
             erro.append(str(excecao))
             return
         # Só depois do publisher confirm o pedido pode ir para `pendente`.
@@ -513,6 +564,306 @@ class PedidoViewSet(viewsets.ModelViewSet):
             "sim",
             "yes",
         }
+
+    # ------------------------------------------------------------------
+    # Aula 11 — `POST /pedidos/{id}/pagamento/`: o produtor do
+    # `PagamentoRegistrado`
+    # ------------------------------------------------------------------
+    @action(detail=True, methods=["get", "post"], url_path="pagamento")
+    def pagamento(self, request, pk: str | None = None) -> Response:
+        """Simula o gateway, grava o `Pagamento` e publica o evento.
+
+        O gateway é simulado porque a aula precisa do **fluxo**, não de um
+        provedor real: o POST decide o desfecho (`aprovado`/`recusado`) e o
+        worker reage a ele. O que importa é que a decisão do "gateway" e a
+        publicação do evento sejam passos separados, como seriam no mundo real.
+
+        Sequência (a mesma ordem do `create`, pelas mesmas razões):
+
+        1. valida o corpo e a existência do pedido (404 se não houver);
+        2. grava o `Pagamento` em `registrado` numa transação;
+        3. publica o `PagamentoRegistrado` **depois** do commit;
+        4. devolve 201 com os dados da publicação.
+
+        O passo 3 falhando deixa o pagamento em `registrado` e a resposta é
+        **503** — e o re-POST no mesmo endpoint republica (é o que o
+        idempotency_key do pagamento permite ver, abaixo). Não há
+        `pending_publicacao` aqui: `registrado` já é esse estado.
+
+        `GET` no mesmo caminho devolve o pagamento atual, o que dá ao cliente
+        o polling do desfecho sem precisar do recurso de notificação.
+        """
+        pedido = self.get_object()
+        simular_falha = self._simular_falha_pagamento(request)
+
+        if request.method == "GET":
+            pagamento = (
+                Pagamento.objects.filter(pedido=pedido)
+                .select_related("pedido__usuario")
+                .first()
+            )
+            if pagamento is None:
+                return Response(
+                    {
+                        "detail": "Este pedido ainda não tem pagamento registrado.",
+                        "pedido_id": pedido.pk,
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            return Response(PagamentoSerializer(pagamento).data)
+
+        serializer = PagamentoSimularSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        dados = serializer.validated_data
+
+        # A chave de idempotência é do servidor, derivada de
+        # (pedido, metodo, desfecho). Um pagamento é uma tentativa **específica**:
+        # re-POSTar com outro método ou outro desfecho é outra tentativa, não a
+        # repetição da anterior. Como `Pagamento.pedido` é `OneToOne`, a
+        # segunda tentativa cai no `IntegrityError` e é tratada abaixo — e a
+        # chave é o que separa os dois casos ali (ver `_republicar_pagamento`).
+        chave = _chave_pagamento(
+            pedido.pk, dados["metodo"], bool(dados["aprovado"])
+        )
+
+        try:
+            with transaction.atomic():
+                pagamento = Pagamento.objects.create(
+                    pedido=pedido,
+                    metodo=dados["metodo"],
+                    # Snapshot de `Pedido.total`: o catálogo pode mudar depois, e
+                    # a cobrança não pode.
+                    valor=pedido.total,
+                    transacao_id=f"txn-{uuid.uuid4().hex[:24]}",
+                    aprovado=dados["aprovado"],
+                    motivo_recusa=dados.get("motivo_recusa") or "",
+                    status=Pagamento.REGISTRADO,
+                    idempotency_key=chave,
+                    simular_falha=simular_falha,
+                )
+        except IntegrityError:
+            return self._republicar_pagamento(
+                pedido, chave, dados.get("canal") or ""
+            )
+
+        # `canal_notificacao` é atributo efêmero: o contrato o lê, mas não é
+        # coluna do `Pagamento` (quem o persiste é a `Notificacao`, criada pelo
+        # worker). Atribuir aqui, e não no `create`, deixa explícito que ele
+        # existe só entre a publicação e o worker.
+        pagamento.canal_notificacao = dados.get("canal") or Notificacao.CANAL_EMAIL
+
+        publicacao: dict[str, Any] = {}
+        erro: list[str] = []
+        transaction.on_commit(lambda: self._publicar_pagamento(pagamento, publicacao, erro))
+
+        if not publicacao:
+            return Response(
+                {
+                    "detail": (
+                        "Pagamento registrado, mas o evento não pôde ser "
+                        "publicado (broker indisponível). O pagamento ficou com "
+                        f"status '{Pagamento.REGISTRADO}' e o mesmo POST "
+                        "republica o evento."
+                    ),
+                    "pagamento_id": pagamento.pk,
+                    "pedido_id": pedido.pk,
+                    "status": Pagamento.REGISTRADO,
+                    "idempotency_key": pagamento.idempotency_key,
+                    "erro": erro[0] if erro else "publicação não confirmada",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        pagamento.refresh_from_db()
+        # O bloco `evento` (tópico, partição, offset, `evento_id`) é o que liga
+        # a resposta ao log do worker, e é o mesmo que o re-POST devolve. Sem
+        # ele aqui, o cliente teria o pagamento mas não a prova de onde ele
+        # foi parar - e o `PedidoCriado` já devolve esses dados no 201.
+        return Response(
+            {
+                **PagamentoSerializer(pagamento).data,
+                "evento": publicacao,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _publicar_pagamento(
+        pagamento: Pagamento, publicacao: dict, erro: list
+    ) -> None:
+        """Publica o `PagamentoRegistrado` e registra o desfecho nas caixas.
+
+        Diferente do pedido, **não** há update de status depois da publicação:
+        `registrado` → `aprovado`/`recusado` é o **worker** que faz, no efeito do
+        evento. Se a API fizesse esse update, o worker's `UPDATE` condicional
+        (que só avança a partir de `registrado`) casaria zero linhas e a
+        notificação — o efeito que importa — nunca seria criada.
+        """
+        try:
+            publicacao.update(
+                mensageria.publicar_pagamento_registrado(pagamento)
+            )
+        except mensageria.PublicacaoFalhou as excecao:
+            erro.append(str(excecao))
+
+    def _republicar_pagamento(
+        self, pedido: Pedido, chave: str, canal: str
+    ) -> Response:
+        """Trata o re-POST depois do `IntegrityError` do `OneToOne`.
+
+        O `IntegrityError` só diz que **este pedido já tem um pagamento** — não
+        que ele é o pagamento que o cliente está tentando criar. A distinção é
+        feita pela `idempotency_key`, que é derivada de
+        (pedido, método, desfecho):
+
+        * chave **igual** → é a mesma tentativa. republica se ainda estiver em
+          `registrado` (a recuperação do 503) e devolve 200; se já resolvido,
+          devolve 200 com o estado atual e `republicado: false`, porque o
+          gateway já respondeu e publicar de novo notificaria um fato já
+          notificado;
+        * chave **diferente** → é outra tentativa (outro método ou outro
+          desfecho), e `OneToOne` a impede. Devolve **409** com o pagamento
+          existente no corpo.
+
+        Sem essa checagem, um POST com `metodo=boleto` contra um pedido pago com
+        PIX devolvia 200 e o pagamento em PIX — o cliente receberia um
+        "deu certo" para um pedido que não tentou fazer. Um 409 é a resposta
+        honesta: a linha existe e não é a que você pediu.
+        """
+        pagamento = (
+            Pagamento.objects.filter(pedido=pedido)
+            .select_related("pedido__usuario")
+            .first()
+        )
+        if pagamento is None:  # pragma: no cover - corrida improvável
+            raise Http404("Pagamento em conflito, mas sumiu do banco.")
+
+        if pagamento.idempotency_key != chave:
+            return Response(
+                {
+                    "detail": (
+                        "Este pedido já tem um pagamento registrado, e o método "
+                        "ou desfecho enviado é diferente do pagamento existente. "
+                        "Um pedido aceita um único pagamento (OneToOne); para "
+                        "tentar de novo é preciso um novo pedido."
+                    ),
+                    "pedido_id": pedido.pk,
+                    "pagamento_existente": PagamentoSerializer(pagamento).data,
+                    "idempotency_key_enviado": chave,
+                    "idempotency_key_existente": pagamento.idempotency_key,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if pagamento.status == Pagamento.REGISTRADO:
+            # O canal **não** é persistido no `Pagamento`, então a republicação
+            # usa o canal desta requisição em vez de um default fixo: se o
+            # cliente pediu `sms` e o primeiro POST só falhou na publicação,
+            # forçar `email` aqui entregaria o aviso no canal que ele não pediu.
+            pagamento.canal_notificacao = (
+                canal or Notificacao.CANAL_EMAIL
+            )
+            publicacao: dict[str, Any] = {}
+            erro: list[str] = []
+            self._publicar_pagamento(pagamento, publicacao, erro)
+            if not publicacao:
+                return Response(
+                    {
+                        "detail": (
+                            "Pagamento continua em 'registrado' e o evento não "
+                            "pôde ser publicado (broker indisponível)."
+                        ),
+                        "pagamento_id": pagamento.pk,
+                        "status": pagamento.status,
+                        "erro": erro[0] if erro else "publicação não confirmada",
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            return Response(
+                {
+                    **PagamentoSerializer(pagamento).data,
+                    "evento": publicacao,
+                    "republicado": True,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {
+                **PagamentoSerializer(pagamento).data,
+                "evento": {
+                    "duplicado": True,
+                    "motivo": (
+                        f"o pagamento já estava resolvido ('{pagamento.status}')"
+                    ),
+                },
+                "republicado": False,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @staticmethod
+    def _simular_falha_pagamento(request) -> bool:
+        """Como `_simular_falha`, mas para o fluxo de pagamento.
+
+        O interruptor é separado (`PAGAMENTO_PERMITIR_SIMULACAO_FALHA`) e é
+        consultado **aqui**, na API, exatamente como no fluxo de pedidos: o
+        worker não lê flag nenhuma, ele honra `simular_falha` gravado no banco.
+        A marcação é o que faz a mensagem escalar; a flag é o que decide se o
+        cliente pode pedir isso.
+
+        Separar os dois interruptores (e não um só) porque a falha injetada
+        manda a mensagem para a DLQ **do fluxo de pagamento** - misturar as duas
+        sabotagens no mesmo ambiente tornaria "qual fluxo parou?" mais difícil de
+        responder do que precisava.
+        """
+        if not settings.PAGAMENTO_PERMITIR_SIMULACAO_FALHA:
+            return False
+        return request.headers.get("X-Simular-Falha", "").strip().lower() in {
+            "1",
+            "true",
+            "sim",
+            "yes",
+        }
+
+
+class NotificacaoViewSet(viewsets.ReadOnlyModelViewSet):
+    """`GET /api/v1/notificacoes/` — o que o cliente foi avisado.
+
+    Mesma matriz do pedido, e pela mesma razão de domínio: notificação é dado
+    **pessoal**. O usuário enxerga as suas; `admin` enxerga todas (é quem
+    investiga um aviso que não saiu).
+
+    A queryset já vem filtrada e com `select_related("pagamento")`: o serializer
+    precisa do `pagamento_id`, e sem o join seria uma query por linha numa
+    listagem.
+    """
+
+    queryset = Notificacao.objects.select_related(
+        "pagamento", "pedido__usuario"
+    ).order_by("-enviada_em")
+    serializer_class = NotificacaoSerializer
+    http_method_names = ["get", "head", "options"]
+    # `search` e `ordering` já são globais (settings); falta declarar aqui o que
+    # esta listagem **aceita como filtro**, que é a única decisão local.
+    #
+    # `pedido` e `canal` são os dois eixos que fazem sentido para quem lê um
+    # aviso: "o que foi avisado sobre este pedido" e " quantos e-mails saíram".
+    # Sem esta linha, `?pedido=5111` era **ignorado em silêncio** e a resposta
+    # trazia a lista inteira — o filtro parece funcionar e mente, que é pior do
+    # que recusar.
+    filterset_fields = ["pedido", "canal"]
+    search_fields = ["canal", "titulo"]
+    ordering_fields = ["enviada_em", "-enviada_em"]
+
+    def get_permissions(self):
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        usuario = self.request.user
+        if usuario.is_authenticated and usuario.groups.filter(name="admin").exists():
+            return super().get_queryset()
+        return super().get_queryset().filter(pedido__usuario=usuario)
 
 
 class CacheMetricsView(APIView):

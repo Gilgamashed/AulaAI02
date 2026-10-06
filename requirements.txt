@@ -18,3 +18,14 @@ redis>=5.0,<7.0
 # porque a spec pede que a política de reentrega e o roteamento para a DLQ
 # sejam visíveis no código do projeto, e não atrás de decorators.
 pika>=1.3,<2.0
+# Aula 10: cliente Kafka (`confluent-kafka`, sobre o librdkafka em C).
+# Escolhido em vez de `kafka-python` porque é o único cliente que expõe
+# o que a spec pede: delivery report com `acks=all`, produtor
+# idempotente, consumer group com commit manual de offset e a API de
+# administração (criar tópico com partições/retenção explícitas) — sem ela a
+# topologia teria de ser criada por script externo ao projeto.
+# O pin fica em >=2.15,<3.0 porque `enable.idempotence` e a semântica de
+# commit por mensagem (`commit(message=...)`) que o consumidor usa são
+# garantias da série 2.x; wheels existentes para cp312 (Dockerfile) e cp314
+# (venv local), então a instalação não cai no build do librdkafka.
+confluent-kafka>=2.15,<3.0

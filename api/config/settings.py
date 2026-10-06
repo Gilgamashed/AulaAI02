@@ -306,6 +306,177 @@ CACHES = {
 }
 
 # =====================================================================
+# Aula 10 — Mensageria: Kafka (padrão) ou RabbitMQ
+# =====================================================================
+# Broker usado pelo produtor (dentro do processo da API) e pelo consumidor.
+# O Kafka é o padrão da Aula 10; `rabbitmq` mantém a topologia da Aula 9
+# disponível, sem código duplicado — a escolha acontece em
+# `core/messaging/broker.py` e cada serviço do compose fixa o seu valor.
+#
+# Leitura tolerante a caixa (mesmo `_env_flag`): o compose interpola a string
+# crua do `.env`, e `MENSAGERIA_BROKER=Kafka` ser ignorado em silêncio
+# trocaria o broker sem nenhuma pista no log.
+MENSAGERIA_BROKER = os.environ.get("MENSAGERIA_BROKER", "kafka").strip().lower()
+
+# ---------------------------------------------------------------------
+# Kafka
+# ---------------------------------------------------------------------
+# `bootstrap.servers`: a lista de brokers que o cliente usa para descobrir o
+# resto do cluster. Duas URLs porque são **dois contextos**, e o cliente
+# recebe a lista certa em cada um:
+#   * dentro do compose (api, worker-kafka): `kafka:29092` (listener interno,
+#     anunciado como o nome do serviço, que é resolvido na rede do compose);
+#   * no venv local / script de medição: `localhost:9092` (listener externo,
+#     anunciado como localhost, que é o que o host consegue alcançar).
+# A ordem não importa: o librdkafka tenta todos e usa o que responder.
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+
+# `client.id` padrão. Quem fala com Kafka é identificado por ele no
+# `kafka-consumer-groups.sh --describe` e no log do broker — sem ele, um bug de
+# produção vira "uma aplicação desconhecida está consumindo". O produtor e cada
+# componente sobrescrevem com um sufixo próprio (ver `kafka_topologia`).
+KAFKA_CLIENT_ID = os.environ.get("KAFKA_CLIENT_ID", "synapseshop")
+
+# `acks=all`: o líder espera todas as ISR confirmarem. É o que permite dizer que
+# a mensagem está durável antes de o POST responder 201.
+KAFKA_ACKS = os.environ.get("KAFKA_ACKS", "all")
+
+# `linger.ms`: agrupa publicações de janelas muito curtas em um round-trip ao
+# broker. 5 ms é o que a documentação do librdkafka sugere como ponto de
+# equilíbrio: abaixo disso o ganho é quase nulo, acima disso a latência do POST
+# piora. A mediação da Aula 10 mede este efeito (ver README).
+KAFKA_LINGER_MS = int(os.environ.get("KAFKA_LINGER_MS", "5"))
+
+# `compression.type`. `none` é o padrão **de propósito**: a medição da Aula 10
+# compara broker a broker, e ligar compressão mudaria o resultado por um motivo
+# que não é o broker. Fica exposta para quem quiser medir esse eixo à parte.
+KAFKA_COMPRESSAO = os.environ.get("KAFKA_COMPRESSAO", "none")
+
+# Teto de espera pelo ACK (`delivery.timeout.ms`). Estourado, o cliente entrega
+# um relatório de erro e o `kafka_produtor` transforma em 503 + pedido em
+# `pendente_publicacao`. Alinhado com o timeout do socket para que a falha seja
+# rápida e previsível.
+KAFKA_TIMEOUT_ENVIO_MS = int(os.environ.get("KAFKA_TIMEOUT_ENVIO_MS", "5000"))
+# O mesmo teto em segundos, usado no `flush()` (a API do librdkafka é em
+# segundos, a config é em milissegundos; manter os dois em settings diferentes
+# evitaria um erro de unidade silencioso).
+KAFKA_TIMEOUT_ENVIO_S = KAFKA_TIMEOUT_ENVIO_MS / 1000.0
+
+# Partições do tópico principal: é o eixo de paralelismo do consumo, e o número
+# que a spec pede para medir (1 vs 3). NÃO pode ser alterado depois que o tópico
+# existe — mudar a contagem re-mapeia a key para outra partição e a ordem por
+# pedido se perde (ver a docstring de `kafka_topologia`).
+KAFKA_PARTICOES = int(os.environ.get("KAFKA_PARTICOES", "3"))
+
+# Réplicas. 1 porque o compose roda um broker único (KRaft sem quorum); em
+# cluster real este é o número que evita ponto único de falha, e é por isso que
+# ele é setting e não constante.
+KAFKA_REPLICAS = int(os.environ.get("KAFKA_REPLICAS", "1"))
+
+# `retention.ms` do tópico principal (7 dias) e da DLQ (30 dias). A DLQ dura
+# mais porque é a única cópia de um evento que deu problema; o tópico principal
+# dura o bastante para reproduzir a medição de throughput a partir do histórico.
+KAFKA_RETENCAO_MS = int(os.environ.get("KAFKA_RETENCAO_MS", str(7 * 24 * 3600 * 1000)))
+KAFKA_RETENCAO_DLQ_MS = int(
+    os.environ.get("KAFKA_RETENCAO_DLQ_MS", str(30 * 24 * 3600 * 1000))
+)
+
+# Folga somada a `2 × degrau` na retenção de cada tópico de retry (ver
+# `kafka_topologia.retencao_retry_ms`). No Kafka a retenção APAGA a mensagem —
+# ao contrário do TTL do RabbitMQ, que a devolve —, então a retenção precisa
+# cobrir o backoff com folga para o replayer poder estar reiniciado sem perder
+# mensagem. 10 min é folga para restart, não um plano de retenção.
+KAFKA_FOLGA_RETENCAO_RETRY_MS = int(
+    os.environ.get("KAFKA_FOLGA_RETENCAO_RETRY_MS", str(10 * 60 * 1000))
+)
+
+# Tópicos. Os nomes são os mesmos das filas AMQP da Aula 9 de propósito: as
+# duas bases precisam descrever o mesmo desenho para a comparação entre
+# brokers ser justa (e o `measure_messaging.py` reaproveita as mesmas
+# constantes).
+KAFKA_TOPICO_PEDIDOS = os.environ.get("KAFKA_TOPICO_PEDIDOS", "pedidos.criados")
+KAFKA_TOPICO_DLQ = os.environ.get("KAFKA_TOPICO_DLQ", "pedidos.criados.dlq")
+
+# Grupo do consumidor principal. É a identidade que carrega o offset: trocar o
+# nome (ou o `group.id`) faz o consumidor recomeçar do começo, o que é o
+# mecanismo do teste de replay (`declarar_topicos_kafka --resetar-offsets`).
+KAFKA_GRUPO_CONSUMIDORES = os.environ.get("KAFKA_GRUPO_CONSUMIDORES", "synapseshop-pedidos")
+
+# Grupo do replayer, SEPARADO do principal de propósito: se compartilhassem o
+# grupo, o replayer disputaria partições com o worker e as mensagens de retry
+# parariam de ser devolvidas.
+KAFKA_GRUPO_REPLAY = os.environ.get("KAFKA_GRUPO_REPLAY", "synapseshop-replay")
+
+# Onde começar quando o grupo ainda não tem offset: `earliest` para o teste de
+# replay ler o histórico já publicado. Em produção o padrão seguro é `latest`
+# (não reprocessar o passado); ver a nota no README.
+KAFKA_AUTO_OFFSET_RESET = os.environ.get("KAFKA_AUTO_OFFSET_RESET", "earliest")
+
+# Passo do laço do replayer (s): é a granularidade com que um degrau vencido é
+# percebido. 1 s sobre degraus de 5/15/45 s erra o backoff em no máximo 1 s,
+# muito abaixo da folga da retenção.
+KAFKA_REPLAYER_PASSO_S = float(os.environ.get("KAFKA_REPLAYER_PASSO_S", "1.0"))
+
+# =====================================================================
+# Aula 11 — segundo fluxo de eventos: pagamento ➔ notificação
+# =====================================================================
+# A Aula 9/10 fechou o fluxo do pedido. A Aula 11 acrescenta o segundo fluxo, e
+# ele é um TÓPICO À PARTE, não mais um tipo de evento dentro de
+# `pedidos.criados`. Três razões:
+#
+# 1. **Grupo e offset próprios.** Cada fluxo é consumido por um worker
+#    diferente (`worker-kafka` e `worker-pagamentos`). Se dividissem o tópico,
+#    as duas task queues estariam no mesmo grupo e uma competiria com a outra
+#    por partições — slower, e impossível escalar um sem o outro.
+# 2. **DLQ própria.** Um `PagamentoRegistrado` malformado não pode arrastar
+#    para a `pedidos.criados.dlq` uma cópia de um `PedidoCriado` que talvez
+#    estivesse sadia: a DLQ precisa dizer *qual* fluxo parou.
+# 3. **Escalabilidade independente.** São 3 partições por fluxo, então dá para
+#    subir 3 workers de pagamento sem tocar nos 3 de pedidos.
+#
+# A política de reentrega é COMPARTILHADA (`PEDIDO_MAX_REENTREGAS` e
+# `PEDIDO_BACKOFF_SEGUNDOS`): os dois fluxos precisam do mesmo comportamento, e
+# duas escadas configuráveis separadamente seriam duas chances de errar. O que
+# muda entre eles é o nome — e o nome é derivado do tópico base, então
+# `pagamentos.registrados.retry.1` nasce sem nenhuma constante nova.
+
+KAFKA_TOPICO_PAGAMENTOS = os.environ.get(
+    "KAFKA_TOPICO_PAGAMENTOS", "pagamentos.registrados"
+)
+KAFKA_TOPICO_PAGAMENTOS_DLQ = os.environ.get(
+    "KAFKA_TOPICO_PAGAMENTOS_DLQ", "pagamentos.registrados.dlq"
+)
+KAFKA_GRUPO_PAGAMENTOS = os.environ.get(
+    "KAFKA_GRUPO_PAGAMENTOS", "synapseshop-pagamentos"
+)
+KAFKA_GRUPO_PAGAMENTOS_REPLAY = os.environ.get(
+    "KAFKA_GRUPO_PAGAMENTOS_REPLAY", "synapseshop-pagamentos-replay"
+)
+KAFKA_PARTICOES_PAGAMENTOS = int(
+    os.environ.get("KAFKA_PARTICOES_PAGAMENTOS", str(KAFKA_PARTICOES))
+)
+
+# Interruptor da falha forçada no fluxo de pagamento, e é **a mesma forma** do
+# `PEDIDO_PERMITIR_SIMULACAO_FALHA`: quem o consulta é a **API**, no
+# `_simular_falha_pagamento` da view, para decidir se aceita o header
+# `X-Simular-Falha` e grava `simular_falha=true` no pagamento. O worker NÃO
+# consulta nenhuma das duas flags - ele honra a marcação gravada no banco, e
+# ponto. Assim os dois fluxos se comportam igual, e não existe um estado
+# intermediário em que "quem liga a sabotagem esqueceu uma metade".
+#
+# A flag é separada da de pedidos (`PEDIDO_PERMITIR_SIMULACAO_FALHA`) porque a
+# falha injetada manda a mensagem para a DLQ **do fluxo de pagamento**, e ter as
+# duas sabotagens no mesmo interruptor tornaria "qual fluxo parou?" mais difícil
+# de responder do que precisava.
+#
+# Default `False` (o Compose liga) porque é o interruptor de uma pathogenicidade:
+# com ele ligado, qualquer cliente pode marcar o próprio pagamento para falhar
+# até a DLQ. Fora de desenvolvimento, o header precisa ser ignorado.
+PAGAMENTO_PERMITIR_SIMULACAO_FALHA = _env_flag(
+    "PAGAMENTO_PERMITIR_SIMULACAO_FALHA", "False"
+)
+
+# =====================================================================
 # Aula 8 — Logging estruturado (JSON) do cache
 # =====================================================================
 # Um logger dedicado ("core.cache") emite UMA LINHA JSON por evento de

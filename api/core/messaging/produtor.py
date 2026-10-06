@@ -1,4 +1,9 @@
-"""Produtor: publica o evento `PedidoCriado` na fila (Aula 9).
+"""Produtor **AMQP**: publica o evento `PedidoCriado` na fila (Aula 9).
+
+Este é o produtor do **RabbitMQ**. A escolha entre RabbitMQ e Kafka acontece em
+`broker.py` (variável `MENSAGERIA_BROKER`); a view nunca fala com este módulo
+direto, e sim com `broker.publicar_pedido_criado`. O equivalente Kafka está em
+`kafka_produtor.py`.
 
 Usado pela view `POST /api/v1/pedidos`. Três garantias importam aqui:
 
@@ -29,6 +34,7 @@ from django.conf import settings
 
 from .. import models
 from . import contracts
+from .broker import PublicacaoFalhou
 from .erros import descrever
 from .topologia import (
     HEADER_EVENTO_ID,
@@ -41,15 +47,12 @@ from .topologia import (
 
 logger = logging.getLogger("core.messaging")
 
-
-class PublicacaoFalhou(Exception):
-    """O evento não pôde ser publicado (broker fora, topologia, timeout).
-
-    Levanta para a view responder **503** e manter o pedido em
-    `pendente_publicacao`. A alternativa — responder 201 e tentar publicar
-    depois — é o outbox pattern, que exige mais uma tabela e um processo
-    agendador: fora do escopo desta aula.
-    """
+__all__ = [
+    "PublicacaoFalhou",
+    "com_tentativa",
+    "publicar_pedido_criado",
+    "republicar",
+]
 
 
 def publicar_pedido_criado(pedido: models.Pedido, idempotency_key: str) -> dict[str, Any]:

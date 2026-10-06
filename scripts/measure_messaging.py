@@ -1,4 +1,4 @@
-r"""Medição da **latência e da vazão** assíncronas do fluxo de pedidos (RabbitMQ).
+r"""Medição da **latência e da vazão** assíncronas do fluxo de pedidos (Kafka ou RabbitMQ).
 
 Aula 9 entregou latência: do POST que cria o pedido até o instante em que o
 worker marcou `processado`. A Aula 10 acrescenta o que faltava para o DoD —
@@ -18,22 +18,30 @@ transacionais**:
 4. **Fila parada na DLQ**: um pedido com `X-Simular-Falha: 1` percorre a escada
    de reentrega (5 s / 15 s / 45 s) e termina na `pedidos.criados.dlq`. Com
    `--inspecionar-dlq` a mensagem retida é **lida sem ser consumida**, e o
-   relatório mostra o payload, o `x-tentativa` (nosso contador) e o `x-death`
-   (contador do próprio RabbitMQ).
+   relatório mostra o payload e o contador de tentativa. No Kafka isso vem do
+   `manage.py inspecionar_dlq_kafka --json` (`tentativa`, `motivo`, `offset`);
+   no RabbitMQ, da management API (`x-tentativa` e `x-death`).
 5. **Logs transacionais** (`--analisar-logs`): agrega o JSONL do worker em
    contagem de eventos, latências e distribuição de trabalho por instância.
 
-O script fala HTTP com a API e lê as filas na management API do RabbitMQ
-(`:15672`), usando **somente a biblioteca padrão** — nenhuma dependência nova
-(dentro do container da API ele roda com o Python da imagem).
+O broker é detectado em `/health` (`MENSAGERIA_BROKER`) e o relatório muda de
+fonte conforme ele: no Kafka as etapas de broker são delegadas aos management
+commands (o cliente Python do broker só existe na imagem da API), no RabbitMQ
+as etapas leem a management API (`:15672`). O resto do script — HTTP,
+latência, carga e logs — é idêntico nos dois, e **só a biblioteca padrão** é
+usada, então ele roda tanto no host quanto dentro do container da API.
 
 ```powershell
 # Ciclo completo (o ciclo da escada de reentrega leva ~70 s)
 .venv\Scripts\python.exe scripts\measure_messaging.py --pedidos 20 --duplicatas 3 `
     --forcar-falha 1 --carga 60 --concorrencia 8 --inspecionar-dlq
 
+# Forçar o broker em vez de detectá-lo (útil em CI, onde o /health pode estar
+# atrás de proxy ou o compose pode estar com outro serviço no ar)
+.venv\Scripts\python.exe scripts\measure_messaging.py --broker kafka
+
 # Só a análise de um log já salvo (não precisa da API no ar)
-docker compose logs --no-color --no-log-prefix worker > logs_worker.jsonl
+docker compose logs --no-color --no-log-prefix worker-kafka > logs_worker.jsonl
 .venv\Scripts\python.exe scripts\measure_messaging.py --analisar-logs logs_worker.jsonl
 ```
 
@@ -53,18 +61,31 @@ Notas metodológicas (importam para não ler número errado):
   `X-Simular-Falha` são medições separadas: elas levam ~65 s até a DLQ por
   desenho, e misturá-las na média "contaminaria" a latência do fluxo feliz com
   o tempo de espera que a política de reentrega impõe de propósito.
-* **Profundidade de fila no fim.** A management API é lida depois do fluxo, e
-  o resultado é a evidência da DLQ (`messages_ready` na fila de dead letter).
-  Antes de fotografar, o script **espera a mensagem aparecer de fato** na DLQ:
-  o `status = falha` no banco é gravado *antes* da publicação, então perguntar
-  ao banco nada prova sobre a fila. Ver `aguardar_mensagem_na_dlq`.
-* **Inspecionar a DLQ não consome.** A leitura usa `ack_requeue_true`, e o
-  requeue de uma mensagem já dead-letterada foi verificado como estável: a fila
-  segue com a mesma mensagem 90 s depois.
+* **Profundidade de fila no fim.** A profundidade é lida depois do fluxo, e o
+  resultado é a evidência da DLQ (`messages_ready` no RabbitMQ, o offset da
+  partição no Kafka). Antes de fotografar, o script **espera a mensagem
+  aparecer de fato** na DLQ: o `status = falha` no banco é gravado *antes* da
+  publicação, então perguntar ao banco nada prova sobre a fila. Ver
+  `aguardar_mensagem_na_dlq`.
+* **Inspecionar a DLQ não consome.** No RabbitMQ a leitura usa
+  `ack_requeue_true`, e o requeue de uma mensagem já dead-letterada foi
+  verificado como estável: a fila segue com a mesma mensagem 90 s depois. No
+  Kafka a leitura não faz `assign`, apenas pede as mensagens por offset e
+  **não confirma o offset**, então a mensagem continua na partição.
 * **A vazão depende do número de consumidores.** Com um worker, cada pedido é
-  processado um de cada vez (`prefetch_count=1`). Repetir a carga com
-  `--scale worker=3` mede o ganho de ter mais consumidores na mesma fila, e a
-  distribuição de trabalho por instância aparece em `--analisar-logs`.
+  processado um de cada vez (`prefetch_count=1` no RabbitMQ, uma mensagem por
+  `poll()` no Kafka). Repetir a carga com `--scale worker-kafka=3` mede o
+  ganho de ter mais consumidores, e a distribuição de trabalho por instância
+  aparece em `--analisar-logs`. **No Kafka o paralelismo é por partição**:
+  `pedidos.criados` tem 3 partições, então mais de 3 consumidores ficam
+  ociosos. E o ganho não é linear, porque o broker single-node é quem
+  coordena os commits de offset — é o número medido que vale, não a teoria.
+* **Não medir vazão pelo relógio do próprio script.** O `GET /pedidos/{id}`
+  custa ~800 ms nesta pilha (DRF + banco), então um `GET` por pedido por
+  segundo limita a leitura do *script*, não a do worker: uma medição de 64
+  pedidos mostrou 1,0/s enquanto o log do worker provava ~20/s. Para medir
+  vazão do consumer de verdade, acumule o offset confirmado do grupo
+  (`declarar_topicos_kafka`) e cronometre até ele alcançar a marca d'água.
 """
 
 from __future__ import annotations
@@ -75,6 +96,7 @@ import json
 import math
 import os
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -87,10 +109,93 @@ from concurrent.futures import ThreadPoolExecutor
 ITENS_PATH = "/api/v1/items/"
 PEDIDOS_PATH = "/api/v1/pedidos/"
 TOKEN_PATH = "/api/v1/auth/token/"
+HEALTH_PATH = "/health"
 # nomes de fila da Aula 9 (ver core/messaging/topologia.py)
 FILA_PRINCIPAL = "pedidos.criados"
 FILA_DLQ = "pedidos.criados.dlq"
 FILAS_RETRY = ("pedidos.criados.retry.1", "pedidos.criados.retry.2", "pedidos.criados.retry.3")
+
+BROKER_KAFKA = "kafka"
+BROKER_RABBITMQ = "rabbitmq"
+
+
+def detectar_broker(base_url: str) -> str:
+    """Pergunta à API qual broker está ativo (`/health` expõe `MENSAGERIA_BROKER`).
+
+    Preferir a detecção a uma flag fixa é o que permite o mesmo script medir as
+    duas implantações: o resto do relatório (latência, carga, logs) não muda, e
+    só as etapas de broker trocam de fonte. Cai no RabbitMQ quando o /health não
+    responder — que é o padrão histórico do projeto e o erro menos-surpreendente.
+    """
+    status, corpo, _ = request(base_url + HEALTH_PATH, timeout=5.0)
+    if status == 200 and isinstance(corpo, dict):
+        declarado = str(corpo.get("MENSAGERIA_BROKER") or corpo.get("broker") or "").lower()
+        if declarado.startswith(BROKER_KAFKA):
+            return BROKER_KAFKA
+    return BROKER_RABBITMQ
+
+
+def comando_manage(gestao: str, *extra: str) -> dict | None:
+    """Roda `manage.py <gestao> --json` dentro do container da API e devolve o JSON.
+
+    No Kafka não existe management API HTTP equivalente ao RabbitMQ: os dados de
+    partição, offset, retenção e DLQ só estão no cliente Python do broker, e ele
+    está instalado na imagem da API. Delegar ao management command evita duplicar
+    a lógica de leitura de offset no script — e garante que o número do relatório
+    venha do mesmo código que o `descrever` mostra a quem opera o broker.
+
+    Devolve `None` quando o comando falha (compose parado, imagem sem o cliente
+    Kafka), para que a etapa vire uma linha avisando em vez de derrubar a
+    medição inteira.
+    """
+    comando = [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "api",
+        "python",
+        "api/manage.py",
+        gestao,
+        "--json",
+        *extra,
+    ]
+    try:
+        # Lista de argumentos, nunca string: sem shell, sem interpolação de
+        # shell — a lista é fixa e não recebe entrada do usuário.
+        concluido = subprocess.run(
+            comando, capture_output=True, text=True, timeout=120, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as erro:
+        print(f"   falha ao rodar `{' '.join(comando)}`: {erro}")
+        return None
+    if concluido.returncode != 0:
+        print(f"   `manage.py {gestao}` saiu com {concluido.returncode}: {concluido.stderr[:200]}")
+        return None
+    # O logger escreve JSON no mesmo stdout, então a saída mistura linhas de log
+    # com o relatório do comando. O relatório é o último objeto completo da
+    # saída: procura-se de trás para frente o primeiro `{` que dá um objeto
+    # válido. Tentar só `rfind("\n{")` não basta, porque o comando pode não ter
+    # logado nada antes e o relatório começar na posição 0.
+    saida = concluido.stdout
+    # Só interessam `{` que abrem uma linha: as linhas de log são
+    # pretty-printed em uma linha, e um `{` interno delas devolveria o objeto
+    # aninhado em vez do relatório. O relatório é pretty-printed, então sempre
+    # começa em coluna 0.
+    posicoes = [
+        inicio
+        for inicio, caractere in enumerate(saida)
+        if caractere == "{" and (inicio == 0 or saida[inicio - 1] == "\n")
+    ]
+    for inicio in reversed(posicoes):
+        try:
+            documento, _ = json.JSONDecoder().raw_decode(saida[inicio:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(documento, dict) and documento:
+            return documento
+    print(f"   nenhum relatório JSON encontrado na saída de `manage.py {gestao}`")
+    return None
 
 
 # =====================================================================
@@ -642,6 +747,66 @@ def _credencial(usuario: str, senha: str) -> str:
     return f"Basic {b64encode(f'{usuario}:{senha}'.encode()).decode()}"
 
 
+# =====================================================================
+# Etapas de broker: Kafka (via management commands) ou RabbitMQ (API)
+# =====================================================================
+def topicos_kafka() -> dict | None:
+    """Relatório de tópicos, retenção e offsets (`manage.py declarar_topicos_kafka`).
+
+    Substitui as três leituras do RabbitMQ (profundidade, consumidores e
+    contagem por fila) por uma fonte só: no Kafka, partição e offset **são** a
+    fila, então `commit` e `lag` por partição dizem mais do que `messages_ready`.
+    """
+    return comando_manage("declarar_topicos_kafka")
+
+
+def inspecionar_dlq_kafka(limite: int) -> dict | None:
+    """Lê a DLQ do Kafka **sem consumir**: o comando não confirma offset.
+
+    O equivalente do `ack_requeue_true` do RabbitMQ. Confirmação de offset
+    aqui apagaria a evidência de qualquer falha futura — que é justamente o que
+    a DLQ existe para preservar.
+    """
+    return comando_manage("inspecionar_dlq_kafka", "--limite", str(limite))
+
+
+def aguardar_mensagem_na_dlq_kafka(limite: int, timeout_s: float) -> dict:
+    """Espera a partição da DLQ ter ao menos uma mensagem.
+
+    Mesmo motivo da versão RabbitMQ (`aguardar_mensagem_na_dlq`): o `falha` no
+    banco é gravado antes da publicação, e perguntar ao banco não prova que a
+    mensagem chegou ao tópico.
+    """
+    inicio = time.perf_counter()
+    ultima: dict | None = None
+    while True:
+        ultima = inspecionar_dlq_kafka(limite)
+        total = _total_mensagens_dlq_kafka(ultima)
+        aguardou = time.perf_counter() - inicio
+        if total > 0 or aguardou >= timeout_s:
+            return {
+                "mensagens": total,
+                "aguardou_s": round(aguardou, 2),
+                "ok": total > 0,
+                "observacao": (
+                    "comando indisponível" if ultima is None and total == 0 else ""
+                ),
+            }
+        time.sleep(0.5)
+
+
+def _total_mensagens_dlq_kafka(relatorio: dict | None) -> int:
+    """Soma as mensagens da DLQ a partir do relatório do management command."""
+    if not isinstance(relatorio, dict):
+        return 0
+    for chave in ("total_listado", "mensagens", "total", "retidas"):
+        valor = relatorio.get(chave)
+        if isinstance(valor, int):
+            return valor
+    mensagens = relatorio.get("mensagens")
+    return len(mensagens) if isinstance(mensagens, list) else 0
+
+
 def inspecionar_dlq(api_url: str, usuario: str, senha: str) -> dict:
     """Lê a mensagem retida na DLQ, **sem consumi-la**.
 
@@ -927,15 +1092,21 @@ def analisar_logs(caminho: str) -> dict:
     * `por_worker` — quantos pedidos cada instância do worker processou, que é
       a medida real do round-robin entre os consumidores concorrentes.
 
+    No Kafka entra também a distribuição **por partição**, porque é ela que
+    explica o paralelismo: o broker entrega cada partição a um consumidor só,
+    e três partições dão no máximo três consumidores trabalhando.
+
     ```powershell
-    docker compose logs --no-color --no-log-prefix worker > logs_worker.jsonl
+    docker compose logs --no-color --no-log-prefix worker-kafka > logs_worker.jsonl
     .venv\Scripts\python.exe scripts\measure_messaging.py --analisar-logs logs_worker.jsonl
     ```
     """
     contagem: dict[str, int] = {}
     por_worker: dict[str, int] = {}
+    por_particao: dict[str, int] = {}
     duracoes: list[float] = []
     atrasos: list[float] = []
+    esperas_replay: list[float] = []
     nao_json = 0
     total = 0
 
@@ -959,7 +1130,18 @@ def analisar_logs(caminho: str) -> dict:
             if registro.get("evento") == "PedidoProcessado":
                 chave = container or "(sem prefixo)"
                 por_worker[chave] = por_worker.get(chave, 0) + 1
-            for campo, destino in (("duracao_ms", duracoes), ("atraso_fila_ms", atrasos)):
+                particao = registro.get("particao")
+                if particao is not None:
+                    rotulo_particao = str(particao)
+                    por_particao[rotulo_particao] = por_particao.get(rotulo_particao, 0) + 1
+            for campo, destino in (
+                ("duracao_ms", duracoes),
+                ("atraso_fila_ms", atrasos),
+                # `espera_ms` é o tempo que a degrau de replay segurou a
+                # mensagem antes de liberar: prova que o backoff de 5/15/45 s
+                # acontece no tópico, e não num sleep do worker.
+                ("espera_ms", esperas_replay),
+            ):
                 valor = registro.get(campo)
                 if isinstance(valor, (int, float)):
                     destino.append(float(valor))
@@ -970,8 +1152,10 @@ def analisar_logs(caminho: str) -> dict:
         "linhas_sem_json": nao_json,
         "eventos": dict(sorted(contagem.items(), key=lambda par: -par[1])),
         "processados_por_worker": dict(sorted(por_worker.items(), key=lambda par: -par[1])),
+        "processados_por_particao": dict(sorted(por_particao.items(), key=lambda par: -par[1])),
         "duracao_ms": resumir("trabalho no consumidor", duracoes),
         "atraso_fila_ms": resumir("espera na fila (publicado -> recebido)", atrasos),
+        "espera_replay_ms": resumir("espera do degrau de reentrega", esperas_replay),
     }
 
 
@@ -1031,7 +1215,20 @@ def main() -> int:
     parser.add_argument(
         "--inspecionar-dlq",
         action="store_true",
-        help="lê a mensagem retida na DLQ (sem consumi-la) e mostra x-death/x-tentativa",
+        help="lê a mensagem retida na DLQ (sem consumi-la) e mostra tentativa/motivo",
+    )
+    parser.add_argument(
+        "--broker",
+        choices=[BROKER_KAFKA, BROKER_RABBITMQ, "auto"],
+        default="auto",
+        help="broker em uso; 'auto' lê MENSAGERIA_BROKER em /health",
+    )
+    parser.add_argument(
+        "--dlq-limite",
+        type=int,
+        default=5,
+        help="mensagens da DLQ lidas na inspeção (só no Kafka; o RabbitMQ "
+        "lê sempre 5 com ack_requeue_true)",
     )
     parser.add_argument(
         "--rabbitmq-api",
@@ -1060,7 +1257,7 @@ def main() -> int:
     parser.add_argument(
         "--purgar",
         action="store_true",
-        help="esvazia as filas da Aula 9 antes de medir (recomendado: DLQ "
+        help="esvazia as filas/tópicos antes de medir (recomendado: DLQ "
         "com resíduo de outra execução falsearia a contagem final)",
     )
     args = parser.parse_args()
@@ -1083,16 +1280,22 @@ def main() -> int:
         return 0
 
     base_url = args.base_url.rstrip("/")
-    relatorio: dict = {"rotulo": args.rotulo, "ambiente": ambiente or "local"}
+    broker = detectar_broker(base_url) if args.broker == "auto" else args.broker
+    relatorio: dict = {"rotulo": args.rotulo, "ambiente": ambiente or "local", "broker": broker}
 
     if args.purgar:
         dizer("\n-- 0. limpando as filas da Aula 9 --")
-        relatorio["purgar"] = purgar_filas(
-            args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
-        )
+        if broker == BROKER_KAFKA:
+            # Apaga os tópicos de DLQ/retry antes de medir: uma DLQ com resíduo de
+            # outra execução somaria mensagens alheias ao relatório.
+            relatorio["purgar"] = comando_manage("declarar_topicos_kafka", "--purgar")
+        else:
+            relatorio["purgar"] = purgar_filas(
+                args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
+            )
         dizer(f"   {relatorio['purgar']}")
 
-    dizer(f"\n== {args.rotulo}: mensageria (RabbitMQ) ==")
+    dizer(f"\n== {args.rotulo}: mensageria ({broker}) ==")
     sessao = login(base_url, args.usuario, args.senha)
     skus = descobrir_skus(sessao, 3)
     dizer(f"   SKUs do catálogo: {', '.join(s[0] for s in skus)}")
@@ -1132,9 +1335,14 @@ def main() -> int:
     # da última fila de retry. Ver `aguardar_mensagem_na_dlq`.
     if args.forcar_falha > 0:
         dizer("\n-- 5. aguardando a mensagem chegar de fato na DLQ --")
-        relatorio["dlq_chegada"] = aguardar_mensagem_na_dlq(
-            args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
-        )
+        if broker == BROKER_KAFKA:
+            relatorio["dlq_chegada"] = aguardar_mensagem_na_dlq_kafka(
+                args.dlq_limite, timeout_s=30.0
+            )
+        else:
+            relatorio["dlq_chegada"] = aguardar_mensagem_na_dlq(
+                args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
+            )
         dizer(f"   {relatorio['dlq_chegada']}")
 
     # 6) a mensagem que ficou na DLQ -------------------------------------
@@ -1144,21 +1352,30 @@ def main() -> int:
     # evidência nem contamina a profundidade medida na etapa 7.
     if args.inspecionar_dlq:
         dizer("\n-- 6. mensagem retida na DLQ (leitura, não consome) --")
-        relatorio["dlq_inspecao"] = inspecionar_dlq(
-            args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
-        )
+        if broker == BROKER_KAFKA:
+            relatorio["dlq_inspecao"] = inspecionar_dlq_kafka(args.dlq_limite)
+        else:
+            relatorio["dlq_inspecao"] = inspecionar_dlq(
+                args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
+            )
         dizer(f"   {relatorio['dlq_inspecao']}")
 
-    # 7) filas e consumidores -------------------------------------------
-    dizer("\n-- 7. profundidade das filas e consumidores (management API) --")
-    relatorio["filas"] = ler_profundidade_filas(
-        args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
-    )
-    relatorio["consumidores"] = contar_consumidores(
-        args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
-    )
-    dizer(f"   filas: {relatorio['filas']}")
-    dizer(f"   consumidores por fila: {relatorio['consumidores']}")
+    # 7) estado do broker: filas e consumidores (RabbitMQ) ou tópicos,
+    #    retenção e offsets por partição (Kafka).
+    if broker == BROKER_KAFKA:
+        dizer("\n-- 7. tópicos, retenção e offsets por partição (Kafka) --")
+        relatorio["topicos"] = topicos_kafka()
+        dizer(f"   {relatorio['topicos']}")
+    else:
+        dizer("\n-- 7. profundidade das filas e consumidores (management API) --")
+        relatorio["filas"] = ler_profundidade_filas(
+            args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
+        )
+        relatorio["consumidores"] = contar_consumidores(
+            args.rabbitmq_api, args.rabbitmq_usuario, args.rabbitmq_senha
+        )
+        dizer(f"   filas: {relatorio['filas']}")
+        dizer(f"   consumidores por fila: {relatorio['consumidores']}")
 
     relatorio["renovacoes_de_token"] = sessao.renovacoes
     absorvidos = dict(_ABSORVIDOS)
