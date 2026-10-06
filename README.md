@@ -62,20 +62,30 @@ Docker, Django REST Framework, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis.
 
 ## Como subir o ambiente
 
-Infraestrutura conteinerizada com Docker Compose (Aula 2/3). O ambiente é
-composto por três serviços:
+Infraestrutura conteinerizada com Docker Compose (Aula 2/3, estendida até a
+Aula 11). São **sete serviços**:
 
 | Serviço      | Imagem             | Função                                               |
 | ------------ | ------------------ | ---------------------------------------------------- |
 | `api`        | build do Dockerfile | API Django REST Framework: `/health` + rotas CRUD em `/api/v1/` (porta 8000) |
 | `db`         | `postgres:16-alpine` | Banco PostgreSQL (volume `pgdata` para persistência); porta interna `db:5432` **publicada em `localhost:5432`** para permitir comandos de gerenciamento locais (venv) |
+| `redis`      | `redis:7-alpine`   | Cache-aside do microsserviço de estoque (Aula 8) **e** janela de dedupe dos dois fluxos Kafka (Aulas 9 a 11) |
+| `kafka`      | Apache Kafka (KRaft, modo único nó) | Broker de mensageria. Roda com `auto.create.topics.enable=false`: quem cria os tópicos é a aplicação (ver "Subir o ambiente") |
 | `inventory`  | build de `services/inventory/Dockerfile` | Microsserviço FastAPI de estoque: `/health`, `/docs` e CRUD em `/api/v1/inventory` (porta 8001); persistência própria no PostgreSQL governada pelo Alembic (Aula 6) |
+| `worker-kafka` | mesma imagem da `api` | Consumidor do fluxo de **pedidos** (`pedidos.criados`, grupo `synapseshop-pedidos`) |
+| `worker-pagamentos` | mesma imagem da `api` | Consumidor do fluxo de **pagamentos** (`pagamentos.registrados`, grupo `synapseshop-pagamentos`) |
+
+Existe ainda um serviço `rabbitmq`, mas ele está atrás do profile `rabbitmq`
+(Aulas 9/10) e **não sobe** no caminho Kafka — que é o broker padrão da Aula 11.
+Para usá-lo: `docker compose --profile rabbitmq up -d`.
 
 O `Dockerfile` usa **multistage build** (`builder` prepara as dependências;
 `runtime` copia apenas o necessário) com cache eficiente de dependências e
 execução via usuário não-root `appuser`. O serviço `api` só inicia depois que
 o banco responde com sucesso ao `healthcheck` (`depends_on` +
-`service_healthy`).
+`service_healthy`), e é o `api` quem aplica as migrações no startup (ver o
+`CMD` do `Dockerfile`) — os dois workers esperam `api: service_healthy` para não
+consumir antes das tabelas existirem.
 
 ### Pré-requisitos
 
@@ -89,13 +99,46 @@ o banco responde com sucesso ao `healthcheck` (`depends_on` +
 docker compose up -d --build
 ```
 
+Não é preciso declarar os tópicos Kafka na mão: o broker sobe com
+`auto.create.topics.enable=false`, então quem cria a topologia é a aplicação —
+cada worker declara a topologia do **seu** fluxo antes de assinar o tópico
+(`kafka_consumidor.py`, em `rodar()`), e o produtor a declara a cada publicação.
+É isso que faz `docker compose up` bastar. O comando `declarar_topicos_kafka`
+existe para **inspecionar** e para casos de recuperação, não como passo de
+instalação.
+
+O passo que **não** é opcional é o seed de usuários:
+
+```bash
+docker compose exec api python api/manage.py seed_auth
+```
+
+As migrations não criam usuários e o Compose não roda o seed. Sem este comando
+**não existe `demo_user`**, e como todo endpoint de escrita exige JWT, o fluxo
+pedido ➔ pagamento ➔ notificação fica impossível de exercitar. É idempotente:
+pode repetir à vontade. As credenciais estão na seção
+[Autenticação JWT](#autenticação-jwt-papéis-e-throttling-aula-7).
+
 ### Validar a disponibilidade
 
 ```bash
 curl http://localhost:8000/health
-# {"status": "ok", "service": "synapseshop-api"}
+# {"status": "ok", "service": "synapseshop-api", "broker": "kafka",
+#  "fluxos": {"pedidos": {...}, "pagamentos": {...}}}
+
 curl http://localhost:8001/health
 # {"status": "ok", "service": "synapseshop-inventory"}
+```
+
+`fluxos` traz a **topologia** de cada fluxo (tópico, grupo, partições, retenção,
+tópico de DLQ, escada de reentrega). Ele não traz `lag` nem contagem de DLQ de
+propósito: o Compose usa `/health` como `healthcheck` do container, e ler os
+watermarks a cada sondagem transformaria o endpoint de liveness em carga no
+broker. Para o estado que se move:
+
+```bash
+docker compose exec api python api/manage.py declarar_topicos_kafka --fluxo pagamentos --json
+docker compose exec api python api/manage.py inspecionar_dlq_kafka --fluxo pagamentos
 ```
 
 ### Acompanhar os logs
@@ -104,6 +147,15 @@ curl http://localhost:8001/health
 docker compose logs -f api          # logs do serviço API
 docker compose logs -f db           # logs do PostgreSQL (ex.: "database system is ready")
 docker compose logs -f inventory    # logs do microsserviço de estoque
+docker compose logs -f worker-kafka       # consumo do fluxo de pedidos
+docker compose logs -f worker-pagamentos  # consumo do fluxo de pagamentos
+```
+
+Os dois workers emitem **JSON**, e o campo `fluxo` distingue um do outro — o
+mesmo `grep` serve para os dois:
+
+```bash
+docker compose logs worker-pagamentos | grep '"fluxo": "pagamentos"'
 ```
 
 ### Derrubar o ambiente
@@ -679,29 +731,51 @@ intencionalmente rápida e barulhenta em vez de silenciosa, para que a queda do
 cache apareça no log e no dashboard.
 
 
-## Mensageria assíncrona com RabbitMQ (Aula 9)
+## Mensageria assíncrona (Aula 9)
 
 A Aula 9 introduz o **processamento assíncrono por eventos** para o fluxo de
 pedidos. A API deixa de esperar o processamento terminar: cria o pedido,
 publica o evento `PedidoCriado` com publisher confirms e responde **201**. Um
-**worker** independente consome a fila e avança o estado para `processado` (ou
-`falha`), com **idempotência ponta a ponta** e **DLQ** para falhas
-irrecuperáveis.
+**worker** independente consome e avança o estado para `processado` (ou `falha`),
+com **idempotência ponta a ponta** e **DLQ** para falhas irrecuperáveis.
 
-### Ambiente: serviços `rabbitmq` e `worker`
+O broker da Aula 9 é o **RabbitMQ**, e ele continua no projeto como
+implementação alternativa (profile `rabbitmq`). A Aula 10 troca o padrão para
+o **Kafka** — ver "Apache Kafka: partições, offsets e DLQ (Aula 10)". A escolha é
+feita por uma variável de ambiente:
 
-O `docker-compose.yml` adiciona dois serviços:
+```powershell
+# Kafka (padrão)
+docker compose up -d
 
-| Serviço      | Imagem                     | Função                                                    |
-| ------------ | -------------------------- | --------------------------------------------------------- |
-| `rabbitmq`    | `rabbitmq:3.13-management-alpine` | Broker AMQP 0-9-1, com a UI de gestão em `http://localhost:15672` (usuário/senha via `.env`). Filas duráveis, exchanges declarados no startup. |
-| `worker`      | build do Dockerfile       | Consumidor assíncrono via `python api/manage.py consumir_pedidos`. Roda no mesmo código Django (mesmos models e migrações), sem duplicar ORM. Sobe após `api` e `rabbitmq` saudáveis. |
+# RabbitMQ da Aula 9
+$env:MENSAGERIA_BROKER='rabbitmq'
+docker compose --profile rabbitmq up -d rabbitmq worker
+```
 
-O volume `rabbitmqdata` mantém as mensagens persistentes se o container reiniciar.
+O dispatcher (`core/messaging/broker.py`) é o único ponto que sabe qual é o
+broker: a view, o worker e o replayer pedem "publique"/"consuma" e nunca citam
+Kafka ou RabbitMQ. É o que permite as duas implantações rodarem com o mesmo
+código Django, models e migrações — sem duplicar ORM.
 
-O serviço `worker` **não** tem `container_name` de propósito: é o que permite
-`docker compose up -d --scale worker=3` (um `container_name` fixo impede
+### Ambiente: os dois conjuntos de serviços
+
+| Serviço        | Imagem                             | Função                                                    |
+| -------------- | ---------------------------------- | --------------------------------------------------------- |
+| `kafka`        | `apache/kafka:3.9.1`               | Broker Kafka em KRaft single-node. Listener interno `kafka:29092`, externo `localhost:9092`. |
+| `worker-kafka` | build do Dockerfile                | Consumidor Kafka + replayer de retry. Sobe após `api` e `kafka` saudáveis. |
+| `rabbitmq`     | `rabbitmq:3.13-management-alpine`  | Broker AMQP 0-9-1 (profile `rabbitmq`), UI em `http://localhost:15672`. |
+| `worker`       | build do Dockerfile                | Consumidor RabbitMQ (profile `rabbitmq`). |
+
+Os volumes `kafkadata` e `rabbitmqdata` mantêm os dados se o container reiniciar.
+
+Os serviços de worker **não** têm `container_name` de propósito: é o que permite
+`docker compose up -d --scale worker-kafka=3` (um `container_name` fixo impede
 escalar, porque o segundo container não teria nome livre).
+
+A API **não** declara `depends_on` do broker: ela sobe com ou sem mensageria,
+porque o pedido precisa ser gravado mesmo quando o broker está fora (ver
+"Recuperação quando o broker está fora"). Quem depende do broker é o worker.
 
 ### Contrato do evento `PedidoCriado` (v1)
 
@@ -765,9 +839,12 @@ Política:
 
 Se o broker estiver indisponível no momento do POST, o `publish` levanta `PublicacaoFalhou` (inclusive para `OSError`/DNS — evita virar 500). A view responde **HTTP 503** com corpo contendo `pedido_id`, `status: pendente_publicacao`, `idempotency_key` e o erro. O comando `python api/manage.py republicar_pedidos` varre pedidos em `pendente_publicacao`, republica seus eventos (publisher confirms) e, só depois do confirm, move-os para `pendente`. Também aceita `--pedido`, `--limit`, `--dry-run`. O idempotente: reenviar o POST com a mesma `Idempotency-Key` enquanto o broker está fora devolve **HTTP 200** com `evento.duplicado = true` e o pedido permanece em `pendente_publicacao`.
 
-### Observabilidade da Aula 9
+### Observabilidade (comum aos dois brokers)
 
-- **Logs JSON** (logger `core.messaging`): `WorkerIniciado`, `MensagemRecebida`, `PedidoDuplicado`, `PedidoProcessado`, `PedidoFalha`, `PedidoDlq`, `PedidoPublicado`, `PedidoPublicacaoFalhou`, com `evento_id`, `pedido_id`, `chave_idempotencia`, `tentativa`, `atraso_fila_ms`, `duracao_ms`.
+- **Logs JSON** (logger `core.messaging`): a lista completa de eventos está na
+  seção da Aula 10 (45 tipos) e em `docs/contracts/pedido_criado.md`; os campos
+  são `evento_id`, `pedido_id`, `chave_idempotencia`, `tentativa`,
+  `atraso_fila_ms`, `duracao_ms` (e `particao`/`offset`/`espera_ms` no Kafka).
 - **Métricas em memória** (`core.messaging.metricas`): `recebidas`, `processadas`, `duplicadas`, `falhas`, `reentregas`, `dlq`, `invalidas`.
 - **Medição ponta a ponta**: `scripts/measure_messaging.py` (stdlib) faz POST autenticado com `Idempotency-Key` explícita, aguarda `processado` por polling com intervalo adaptativo e reporta: latência **POST** (publisher confirm) e **publicação→processado** (baseada em `evento.publicado_em`), idempotência (3 reenvios), escada de reentrega com timestamps por tentativa, e profundidade das filas via Management API (`:15672`). Usa sessão JWT com renovação automática e pode `--purgar` as filas antes da medição.
 
@@ -782,36 +859,42 @@ Se o broker estiver indisponível no momento do POST, o `publish` levanta `Publi
 
 **Escada de reentrega (X-Simular-Falha):** tentativas registradas em `t+0,0s` (tentativa 0→1), `t+6,1s` (1→2), `t+21,3s` (2→3), `t+66,8s` (3→DLQ) — correspondendo aos degraus **5 s / 15 s / 45 s**. Pedido terminou em `status=falha`, mensagem na `pedidos.criados.dlq`. Após a leitura, as filas ficaram: `pedidos.criados.dlq` com 1 mensagem pronta (evidência da DLQ) e as demais vazias.
 
+> Esses dois blocos de medições são da **Aula 9 (RabbitMQ)** e ficam aqui como
+> linha de base. A Aula 10 repetiu a medição no Kafka, e os números do Kafka são
+> os da seção seguinte — as duas tecnologias não são diretamente comparáveis
+> linha a linha porque a topologia, a latência de confirmação e o mecanismo de
+> reentrega são diferentes por desenho.
 
-## Vazão, múltiplos consumidores e trade-offs (Aula 10)
 
-A Aula 9 provou que o fluxo funciona e mediu **latência**. A Aula 10 mede o que
-faltava: **quanto o pipeline aguenta** e **o que acontece quando se troca
-disponibilidade por latência**.
+## Apache Kafka: partições, offsets e DLQ (Aula 10)
 
-### Desvio consciente: por que RabbitMQ e não Kafka
+A Aula 9 provou o fluxo assíncrono sobre **RabbitMQ** e mediu latência. A Aula 10
+trocou o broker: agora a implementação é **Apache Kafka**, que é o que a spec
+pede, e a topologia é a do Kafka (tópico + partições + offsets confirmados), não a
+equivalência AMQP. RabbitMQ continua disponível por profile para comparação.
 
-A spec da Aula 10 pede Apache Kafka. A implementação segue em **RabbitMQ**, e o
-motivo é o mesmo que validou a Aula 9: a topologia necessária aqui é
-*filas com TTL e dead-letter*, não *log distribuído com retenção*. As
-equivalências são diretas:
+### O que mudou em relação à Aula 9
 
-| Item pedido (Kafka)                        | O que foi implementado (AMQP 0-9-1)                                       |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
-| Tópico e partições                         | Exchange `topic` + filas nomeadas (`pedidos.criados`)                     |
-| Retenção/expurgo por tempo                 | `x-message-ttl` nas filas de retry (5/15/45 s)                             |
-| Consumidor com `ack` manual                | `auto_ack=False` + `basic_ack` **depois** do efeito                        |
-| `acks=all` / publisher confirm             | `confirm_delivery()` + `mandatory=True`                                    |
-| Consumer group (partição por consumidor)   | round-robin entre consumers da **mesma** fila                              |
-| Dead letter                                | DLX + fila terminal `pedidos.criados.dlq`                                  |
-| Backoff escalonado                         | escada de filas de retry com TTL, uma por degrau                           |
+| Item da spec                                | Como está implementado no Kafka                              |
+| ------------------------------------------- | ------------------------------------------------------------ |
+| Tópico e partições para paralelismo         | `pedidos.criados` com **3 partições**, chave = `str(pedido.pk)` |
+| Retenção configurável                       | `retention.ms` por tópico (7 dias no principal, 30 dias na DLQ) |
+| Consumidor com `ack` manual                 | `enable.auto.commit=false` + `commit()` **depois** do efeito  |
+| `acks=all` / publisher confirm              | `acks=all`, `enable.idempotence=true`, `flush()` antes do 201 |
+| Consumer group (partição por consumidor)    | `synapseshop-pedidos` — cada membro fica dono de uma partição |
+| Dead letter                                 | tópico terminal `pedidos.criados.dlq`, sem consumidor         |
+| Backoff escalonado                          | tópicos `pedidos.criados.retry.1/2/3` com retenção 610/630/690 s |
 
-O que **não** foi fingido: em Kafka o paralelismo de consumo viria de partições
-(várias partições = várias instâncias do mesmo grupo), enquanto aqui ele vem de
-vários consumers na mesma fila. A diferença é que Kafka reordena por chave
-dentro da partição e o RabbitMQ não tem noção de partição — mas para um fluxo
-de **um pedido por mensagem**, os dois modelos entregam a mesma propriedade
-que importa aqui: *N consumidores, cada mensagem para exatamente um deles*.
+Duas decisões que valem registro:
+
+* **A chave de produção é o `pedido_id`.** Assim todos os eventos do mesmo pedido
+  caem na mesma partição, e a ordem dos eventos de um pedido é preservada — a
+  garantia que a partição dá em vez de dar ordem global.
+* **O replayer usa tópico de retenção, não `sleep`.** O degrau de espera é o
+  `retention.ms` do tópico de retry: a mensagem fica lá pelo tempo do backoff e
+  some sozinha. Não há timer no worker, então reiniciar o worker não reinicia a
+  espera. Um `sleep(45)` seria mais simples e perderia a mensagem se o processo
+  morresse.
 
 ### Como as medições foram feitas
 
@@ -822,16 +905,24 @@ docker compose up -d
     --duplicatas 3 --forcar-falha 1 --carga 60 --concorrencia 8 --inspecionar-dlq
 
 # com 3 consumidores concorrentes
-docker compose up -d --scale worker=3
+docker compose up -d --scale worker-kafka=3
 .venv\Scripts\python.exe scripts\measure_messaging.py --purgar --pedidos 20 `
     --duplicatas 3 --forcar-falha 1 --carga 60 --concorrencia 8 --inspecionar-dlq
 
+# estado do broker: tópicos, retenção, offsets confirmados e lag por partição
+docker compose exec api python api/manage.py declarar_topicos_kafka --json
+
 # resumo do log transacional (não precisa da API no ar)
-docker compose logs --no-color worker > logs_worker.jsonl
+docker compose logs --no-color --no-log-prefix worker-kafka > logs_worker.jsonl
 .venv\Scripts\python.exe scripts\measure_messaging.py --analisar-logs logs_worker.jsonl
 ```
 
-Duas regras metodológicas que mudam o número final:
+`scripts/measure_messaging.py` detecta o broker em `/health` e troca só as etapas
+de broker: no Kafka elas delegam aos management commands (o cliente Python do
+broker só existe na imagem da API), no RabbitMQ leem a management API. Latência,
+carga e análise de log são o mesmo código nos dois casos.
+
+Quatro regras metodológicas que mudam o número final:
 
 - **`DRF_USER_RATE` precisa estar no mesmo comando do `docker compose up`.**
   O `docker-compose.yml` injeta `${DRF_USER_RATE:-100/min}`; sem a variável no
@@ -841,111 +932,97 @@ Duas regras metodológicas que mudam o número final:
   de 0,2 s no primeiro ciclo. Em fluxo feliz a latência é da ordem de dezenas de
   milissegundos, ou seja, do mesmo tamanho do intervalo — o número honesto é
   "dezenas de ms", não o valor exato.
-- **As duas execuções têm que ser encostadas.** As tabelas abaixo vêm de duas
-  rodadas seguidas, com 1 e com 3 consumidores, na mesma sessão. Ver
-  "Por que os números foram medidos de novo, em pares".
+- **O `--carga` do script mede a vazão do *pipeline inteiro*, e ele é limitado
+  pelo POST.** O `GET /pedidos/{id}` custa ~0,8 s nesta pilha (DRF + banco), e
+  o `POST` com `acks=all` espera o disco do broker. Uma carga de 30 pedidos com
+  8 em paralelo mede 9,3 ped/s na publicação — e esse teto é da API, não da
+  mensageria.
+- **A vazão do *consumidor* tem que ser medida pelos timestamps do log do
+  worker**, não pelo relógio de um script — ver a seção de paralelismo abaixo.
 
-### Latência e vazão, com 1 e com 3 consumidores
+### Latência (ponta a ponta, com 1 consumidor)
 
-| Cenário (n = 60, 8 POSTs em paralelo) | 1 consumidor | 3 consumidores |
-| ------------------------------------ | ----------- | -------------- |
-| Publicação (POST → broker confirma)   | 11,46 ped/s | 10,72 ped/s    |
-| Processamento (ponta a ponta)        | 7,23 ped/s  | 7,13 ped/s     |
-| Latência sob carga — média           | 4.549 ms    | 4.720 ms       |
-| Latência sob carga — p50 / p95       | 4.828 / 5.183 ms | 5.072 / 5.566 ms |
-| Latência em repouso (n = 20) — média | 85,9 ms     | 114,8 ms       |
-| POST em repouso — média              | 92,3 ms     | 118,7 ms       |
-| Consumers na fila                    | 1           | 3              |
+Medida em repouso, sem carga, com 10 pedidos:
 
-Fluxo feliz (n = 20): com 1 consumidor, média **85,9 ms** (p50 80 ms, p95 112 ms);
-com 3, média **114,8 ms** (p50 106 ms, p95 178 ms).
+| Métrica                                   | valor                            |
+| ----------------------------------------- | -------------------------------- |
+| Latência publicação → `processado`        | média **152 ms**, p50 **100 ms**, p95 640 ms |
+| POST (inclui o `acks=all` do broker)      | média 162 ms, p95 659 ms         |
+| `POST /pedidos/` sob carga (n = 30)       | média 761 ms, p95 967 ms          |
+| Idempotência (2 reenvios da mesma chave)  | 200, mesmo `id`, `duplicado: true` |
+| Respostas 429 absorvidas                 | 0                                |
 
-**O consumidor extra não melhora nada — ele piora um pouco.** Com 3 consumidores
-a vazão cai de 7,23 para 7,13 ped/s e a latência em repouso sobe de 85,9 para
-114,8 ms. Em repouso a fila está sempre vazia: o pedido é publicado e consumido
-em milissegundos, e colocar mais dois containers nesse caminho só acrescenta
-concorrência de conexão e alguma contenção no banco. Sob carga, a latência vai
-de ~86 ms para ~4,6 s **com 1 ou com 3 consumidores** — o número de POSTs
-concluídos por segundo é o mesmo.
+O POST custa mais que a latência do pipeline inteiro: ele espera o
+`acks=all`, que é fsync no disco do broker, e é essa espera que o cliente sente.
+Já a fila assíncrona entrega em milissegundos depois disso.
 
-### Por que os números foram medidos de novo, em pares
+### Vazão e paralelismo: 1 versus 3 consumidores
 
-A primeira rodada desta aula rodou 1 consumidor numa sessão e 3 consumidores em
-outra. Repetir a medição mostrou que **isso não é comparável**: o mesmo código,
-no mesmo host, rendia 9,29 ped/s com 1 consumidor numa sessão e 7,23 ped/s
-noutra — uma variação de ~22% que não tem nada a ver com a mudança de
-arquitetura. Somada à variação de latência (~38%), uma comparação entre
-sessões diferentes teria uma história verosímil e falsa: "3 consumidores deram
-+20% de vazão".
+O número vem dos **timestamps do log do worker**: a vazão é a distância entre a
+primeira e a última `MensagemRecebida` de *uma* rajada, identificada pelo
+prefixo da `chave_idempotencia`. Nenhum relógio de script entra na conta.
 
-Por isso os números da tabela acima vêm de **duas execuções encostadas no mesmo
-minuto, na mesma máquina, com o mesmo tamanho de banco**, e ambas passaram pelo
-contador de 429 (`respostas_429: 0`, `invalido: false`). A lição fica
-registrada de propósito: em benchmark, comparar execuções separadas é o erro
-mais fácil de cometer e o mais difícil de perceber, porque a tabela continua
-bonita.
+> **Por que não cronometrar de fora.** A primeira versão media o drain com um
+> script que lia o offset confirmado do grupo, e o número estava **errado por
+> construção**: dividia a soma *acumulada* dos offsets das 3 partições pelo tempo
+> (`ultimo/dt`), um valor que cresce a cada rodada. Pior, o relógio começava
+> quando o script subia — e o worker começa a drenar no instante em que entra no
+> grupo, então numa rajada de 600 o script leu a linha de base **530 mensagens
+> depois** do início e reportou 0,3 msg/s para um drain que já tinha terminado.
+> O log do worker não sofre desse erro: o instante de cada mensagem é o registro
+> do próprio broker, e a rajada é identificada sem ambiguidade.
 
-### Múltiplos consumidores: a distribuição é que prova
+Método: publica-se uma rajada com o worker **parado** (600 pedidos), sobe-se o
+worker, e mede-se o span da rajada no log. As duas pernas foram executadas
+encostadas, na mesma sessão e com a mesma imagem.
 
-Com 3 consumers na mesma fila, a fase de carga (60 mensagens) foi dividida
-exatamente em três:
+| Rajada de 600 mensagens        | 1 consumidor | 3 consumidores |
+| ------------------------------ | ------------ | -------------- |
+| Span da rajada no log         | **8,53 s**   | **9,68 s**     |
+| Vazão                          | **70,2 msg/s**| **61,9 msg/s** |
+| `duracao_ms` p50 / p95         | 10,7 / 31,3 ms | 9,6 / 45,6 ms |
+| Mensagens por partição         | 197/188/215  | 195/200/205    |
+| Processadas duas vezes         | 0            | 0              |
+| `OffsetCommitFalhou`           | 0            | 0              |
 
-```json
-"processados_por_worker": {"worker-1": 20, "worker-3": 20, "worker-2": 20}
-```
+**3 consumidores foram mais lentos que 1** (61,9 contra 70,2 msg/s, −12%), e não
+3× mais rápidos. A partição-por-consumidor funciona — as 600 mensagens se
+distribuem pelas 3 partições (195/200/205) e nenhuma é processada duas vezes —
+mas **nesta configuração o paralelismo não paga**.
 
-20 + 20 + 20 = 60. Nenhuma mensagem processada duas vezes, nenhuma perdida: o
-RabbitMQ entrega cada mensagem a **um** consumer (`basic_consume` compete entre
-eles), e o round-robin fica evidente no log. É a propriedade que a
-partição-por-consumidor do Kafka dá, aqui sem precisar de partições.
+O motivo provável é o custo fixo de cada consumidor novo entrar no grupo: com 3
+containers o grupo precisa coordenar 3 rebalances, e o `duracao_ms` máximo da
+rajada sobe de 114 ms para **2.881 ms** — quase 3 s em que uma partição ficou
+parada esperando o rebalance. Em uma rajada de 8,5 s, esses segundos fixos
+comem o ganho do paralelismo. Soma-se a isso o commit síncrono por mensagem
+(medido direto contra o broker: p50 1,30 ms, p95 2,59 ms; o mesmo lote sem
+commit vai de 408 para 1017 msg/s), que serializa no broker e não paraleliza.
 
-### Onde está o gargalo (e por que 3 consumidores não ajudaram)
+> **Registro honesto:** a primeira medição desta tabela dio 167 → 223 msg/s
+> (ganho de 1,33×) e a conclusão "o broker single-node satura a 227% de CPU".
+> **Os dois números estavam errados** — o primeiro pela divisão do offset
+> acumulado, o segundo porque o `docker stats` foi amostrado **depois** do drain
+> já ter terminado. A tabela acima é a medição corrigida.
 
-O consumo tem folga de sobra. Do log transacional da fase de carga, com 3
-consumidores (60 mensagens):
+> **Só 3 consumidores podem trabalhar.** `pedidos.criados` tem 3 partições, e o
+> broker entrega cada partição inteira a um membro só. Com `--scale
+> worker-kafka=5`, dois containers entram no grupo, não recebem partição e ficam
+> ociosos gastando memória. Para mais paralelismo é preciso aumentar as
+> partições do tópico — e isso **não pode ser feito depois**: Kafka só aceita
+> aumentar, nunca reduzir.
 
-| Métrica do log                       | média   | p50    | p95    |
-| ------------------------------------ | ------- | ------ | ------ |
-| `duracao_ms` (trabalho no consumidor) | 12,9 ms | 10,9 ms | 27,6 ms |
-| `atraso_fila_ms` (espera na fila)     | 23,6 ms | 20 ms   | 29 ms   |
+### Onde está o gargalo
 
-Ou seja: **cada mensagem consome ~13 ms de trabalho e espera ~24 ms na fila**.
-Um consumer sozinho teria capacidade de ~1/0,013 s ≈ **77 mensagens/s**, e os
-3 juntos dariam ~230/s — muito acima dos ~7/s medidos. A fila nunca chega a
-acumular (`atraso_fila_ms` p95 = 29 ms), então os consumidores não estão
-saturados.
+Do log transacional da rajada de 1 consumidor (600 mensagens):
 
-> O `n` do `atraso_fila_ms` no relatório do `--analisar-logs` é 120 para 60
-> mensagens: o campo aparece em duas linhas de log por mensagem
-> (`MensagemRecebida` e `PedidoProcessado`) e o analisador agrega as duas. O
-> valor por mensagem é o mesmo, então os percentis não mudam.
+| Métrica do log                        | média   | p50     | p95     |
+| ------------------------------------ | ------- | ------- | ------- |
+| `duracao_ms` (trabalho no consumidor) | 13,9 ms | 10,7 ms | 31,3 ms  |
 
-O limite está **antes**, na publicação. Do log da API (as duas rodadas
-pareadas):
-
-| Métrica da API                            | valor        |
-| ----------------------------------------- | ------------ |
-| `PedidoPublicado.duracao_ms`               | p50 **29,8 ms** (p95 70,4 ms) |
-| `TopologiaDeclarada` por publicação        | **1 para 1** (164 publicações = 164 declarações) |
-
-Cada `POST /pedidos/` **abre uma conexão AMQP nova e redeclara a topologia
-inteira** (3 exchanges + 5 filas) antes de publicar. O cliente único da
-medição (8 threads, `urllib` bloqueante) satura em ~11 POSTs/s, e é esse o
-teto do experimento:
-
-| Concorrência do cliente | POSTs/s | latência média do POST |
-| ----------------------- | ------- | ---------------------- |
-| 8                       | 10,7    | 707 ms                 |
-| 24                      | 10,0    | 1.849 ms               |
-
-Triplicar a concorrência **não** aumentou a vazão e apenas empurrou a latência
-do POST para cima — a assinatura clássica de um recurso saturado mais acima.
-Conclusão honesta: **o gargalo desta arquitetura é o produtor, não o
-consumidor.** A correção é o equivalente AMQP do *producer pooling* que a spec
-pede para o Kafka: uma conexão/canal compartilhado por processo, topologia
-declarada uma vez no startup, `confirm_delivery` já ligado. Isso é trabalho de
-uma aula seguinte — aqui fica medido e diagnosticado, não "adicionado e
-comemorado".
+Cada mensagem consome **~14 ms** de trabalho, dos quais ~1,3 ms são o commit
+síncrono — **~10% do tempo**. O `atraso_fila_ms` alto na rajada é proposital: 600
+pedidos publicados antes de o worker subir, para haver o que drenar. Não é
+latência de sistema.
 
 ### Idempotência × latência × throughput
 
@@ -955,16 +1032,15 @@ Os três requisitos puxam em direções opostas, e o desenho escolhe posição:
 | -------------------------------------- | -------------------------------------------- | -------------------------------------------- |
 | Dedupe no Redis antes do efeito        | evita transação e `UPDATE` no banco         | 1 ida e volta ao Redis por mensagem (~1 ms)  |
 | Dedupe **só** no banco (`UPDATE` cond.)| dispensa o Redis no caminho crítico          | transação no banco para toda mensagem         |
-| Backoff 5/15/45 s em filas             | não trava a fila com retentativa             | falha terminal demora ~65 s para ser visível |
-| `prefetch_count=1`                     | processamento por mensagem isolado           | 1 consumer só processa 1 por vez             |
-| Confirmação do produtor                | nenhum 201 "fantasma"                        | POST espera o disco do broker (~30 ms)        |
+| Backoff 5/15/45 s em retenção de tópico | não trava o consumidor com retentativa      | falha terminal demora ~65 s para ser visível |
+| 1 mensagem por `poll()`                | processamento por mensagem isolado           | 1 consumidor processa 1 por vez               |
+| `acks=all` + `enable.idempotence`      | nenhum 201 "fantasma"                        | POST espera o disco do broker                 |
 
 O que a medição mostra é que **a idempotência é barata** (uma ida e volta ao
-Redis, ~1 ms de um total de ~13 ms de trabalho no consumidor) e que **o custo
+Redis, ~1 ms de um total de ~10 ms de trabalho no consumidor) e que **o custo
 real da consistência está em esperar o resultado durável antes de responder
-201** — se a API respondesse antes do confirm, o POST cairia de ~30 ms (p50 do
-`PedidoPublicado.duracao_ms`) para ~1 ms e o cliente passaria a correr o risco
-de um pedido que nunca existiu.
+201** — se a API respondesse antes do confirm, o POST cairia para ~1 ms e o
+cliente passaria a correr o risco de um pedido que nunca existiu.
 
 ### Dedupe fail-open: Redis fora do ar
 
@@ -992,30 +1068,73 @@ exatamente a escolha que a spec pedia para medir.
 > como número no snapshot do `WorkerEncerrado` — dá para responder "quantas
 > vezes a janela não pôde ser usada" sem contar warnings.
 
-### At-least-once: worker morto no meio
+### At-least-once: worker morto e rebalance
 
-Teste de caos: uma carga em andamento e os **3 containers `worker` levados com
-`SIGKILL`** (`docker compose kill worker`), sem chance de requeue orderly, e
-depois religados:
+No Kafka, a garantia é a mesma da Aula 9 mas o nome muda: `basic_ack()` vira
+`commit(message=…)`, e o que antes era "a fila devolveu" agora é "a partição
+voltou para o grupo". O efeito no banco é gravado antes do commit, então uma
+queda entre os dois devolve a mensagem em vez de perdê-la.
 
-| Execução            | Publicados | Processados | Não processados | DLQ | Filas no fim |
-| ------------------- | ---------- | ----------- | --------------- | --- | ------------ |
-| 60 pedidos, conc. 8 | 60         | 60          | 0               | 0   | todas vazias |
+Três cenários medidos:
 
-**Nenhuma mensagem perdida.** É a propriedade que importa no ack manual: a
-confirmação é enviada **depois** do efeito (`dedupe.confirmar()` e só então
-`basic_ack()`), então uma queda de conexão entrega a mensagem de novo em vez de
-fingir que ela sumiu. O reprocessamento é seguro porque as duas barreiras de
-idempotência descritas acima.
+| Cenário                                                  | Resultado |
+| -------------------------------------------------------- | --------- |
+| `docker compose stop worker-kafka` no meio da rajada      | offset confirmado alcançou a marca d'água, **lag final 0** |
+| `--scale worker-kafka=3` → `--scale worker-kafka=1` durante consumo | rebalance com partições mudando de dono; **0 `OffsetCommitFalhou`** |
+| `docker compose kill -s KILL worker-kafka`                | offset volta ao último confirmado; sem perda |
 
-O que **não** foi reproduzido: uma duplicata de verdade. A janela entre
-"efeito confirmado no banco" e "`basic_ack`" é de sub-milissegundo, então o
-SIGKILL raramente cai dentro dela — nos testes o `SIGKILL` pegou a fila já
-drenada. Para provar a duplicata de forma determinística seria preciso um ponto
-de injeção de falha (algo como `X-Simular-Quase-ack`, que derruba o processo
-entre o commit e o ack). O que se pode afirmar com a evidência coletada é a
-ausência de perda; o caminho de duplicata está implementado e logado
-(`PedidoDuplicado`), mas sua reprodução exige essa flag.
+O caso do rebalance mereceu uma correção de código. Ao mudar o número de
+consumidores durante o consumo, o broker invalida a `generation_id` e recusa o
+commit em voo com `ILLEGAL_GENERATION` — o comportamento **documentado** do
+protocolo, porque a partição já tem outro dono e quem confirma o offset é ele.
+Ainda assim o log registrava isso como ERROR vermelho a cada rebalance, parecendo
+defeito no consumer. Hoje `_confirmar()` distingue os dois casos: rebalance sai
+como `OffsetCommitIgnorado` em INFO com o motivo explícito, e só falha real de
+commit continua em ERROR (`OffsetCommitFalhou`). Depois da correção, a rodada
+com rebalance forçado no meio do consumo deu **0** falhas.
+
+### Reset de offset: reprocessar o histórico
+
+`manage.py declarar_topicos_kafka --resetar-offsets` volta o grupo para
+`earliest` (ou `latest`), que é a operação que não existe em AMQP:
+
+```powershell
+# o grupo precisa estar VAZIO, senão o comando nao faz nada (ver abaixo)
+docker compose stop worker-kafka
+docker compose exec api python api/manage.py declarar_topicos_kafka `
+    --resetar-offsets earliest --grupo synapseshop-pedidos
+docker compose up -d worker-kafka
+```
+
+> **O reset só vale com o grupo parado.** Com o worker no ar o comando **retorna
+> sucesso e não move nada**: o broker aceita o `AlterOffsets` para um grupo
+> estável, mas o consumidor já tem a posição em memória e segue dela. Medido
+> aqui: com 3 workers no grupo, o reset reportou `-> earliest` e os offsets
+> continuaram no fim do log (1379/1355/1386 = watermark), com zero mensagens
+> reprocessadas. Parando o grupo, o mesmo comando derrubou os três offsets para
+> 0 (4120 mensagens pendentes) e o replay aconteceu de fato. **Always confira o
+> offset depois do reset** — `declarar_topicos_kafka --json` mostra
+> `commit`/`lag` por partição.
+
+**Replay validado de ponta a ponta.** Depois do reset com o grupo vazio, o worker
+releu as 4120 mensagens da retenção:
+
+| Evento durante o replay                     | Quantidade |
+| ------------------------------------------- | ---------- |
+| `MensagemRecebida`                          | 4.135      |
+| `PedidoDuplicado` (idempotência segurou)    | 4.064      |
+| `PedidoFalha` / `PedidoDlq`                 | 57 / 14    |
+
+E o banco **não mudou nada**: `processado = 4996` e `falha = 24` antes e depois,
+idênticos. É a prova de que o efeito é único mesmo com o histórico inteiro
+reprocessado — o dedupe no Redis e o `UPDATE` condicional no banco absorveram.
+
+Um detalhe que vale registrar: os `PedidoFalha`/`PedidoDlq` do replay **não são
+defeito**. São os pedidos de E2E criados com `X-Simular-Falha`, que guardam
+`simular_falha=True` no banco — ao serem relidos, o consumer levanta a falha
+injetada de novo e a escada roda outra vez. O replay de um histórico que
+contém falhas intencionais **repopula a DLQ** (aqui, de 6 para 20 mensagens).
+Com um histórico só de sucesso, o replay é 100% `PedidoDuplicado`.
 
 ### Logs transacionais
 
@@ -1036,17 +1155,22 @@ com campos estruturados que tornam a análise uma agregação, não um `grep`:
 ```
 
 `--analisar-logs` agrega o arquivo em contagem de eventos, distribuição de
-`duracao_ms`/`atraso_fila_ms` e trabalho por instância (é o que produz o
-20/20/20 acima). O pacote de mensageria emite **21 tipos de evento**, e a lista
-foi conferida contra o código (não é contagem de memória):
+`duracao_ms`/`atraso_fila_ms`/`espera_ms`, trabalho por instância e **por
+partição** (é o que produz o 114/96/90 acima). O pacote de mensageria emite
+**45 tipos de evento**, e a lista foi conferida contra o código com um grep de
+`"evento":` — não é contagem de memória:
 
 | Grupo                | Eventos                                                                                          |
 | -------------------- | ------------------------------------------------------------------------------------------------ |
-| Ciclo da mensagem    | `MensagemRecebida`, `MensagemEncerrada`, `PedidoProcessado`, `PedidoDuplicado`, `PedidoFalha`, `PedidoDlq` |
-| Publicação           | `PedidoPublicado`, `PedidoPublicacaoFalhou`, `TopologiaDeclarada`                                   |
-| Falha de política    | `ReentregaFalhou`, `DlqFalhou`, `PoliticaInconsistente`                                            |
-| Dedupe               | `DedupeDegradado`, `DedupeNaoConfirmado`, `DedupeNaoLiberado`                                       |
-| Ciclo de vida worker | `WorkerIniciado`, `WorkerEncerrado`, `WorkerInterrompido`, `WorkerLimiteAtingido`, `WorkerParando`, `WorkerSemConexao` |
+| Ciclo da mensagem    | `MensagemRecebida`, `MensagemEncerrada`, `PedidoProcessado`, `PedidoDuplicado`, `PedidoFalha`, `PedidoDlq`, `ErroConsumo` |
+| Publicação           | `PedidoPublicado`, `PedidoPublicacaoFalhou`, `ProdutorCriado`, `ProdutorFechando`                |
+| Topologia            | `TopicosDeclarados`, `TopicosDescritos`, `TopicosPurgados`, `OffsetsResetados`                    |
+| Offset               | `OffsetCommitFalhou`, `OffsetCommitIgnorado`, `ReentregaFalhou`, `GruposIndisponiveis`            |
+| Falha de política    | `DlqFalhou`, `PoliticaInconsistente`                                                              |
+| Dedupe               | `DedupeDegradado`, `DedupeNaoConfirmado`, `DedupeNaoLiberado`                                     |
+| Replay               | `ReplayerIniciado`, `ReplayerConectado`, `ReplayerEncerrando`, `ReplayerEncerrado`, `ReplayerErro`, `ReplayerFalha`, `RetryLiberada`, `RetryRetomado`, `RetryAguardando`, `RetrySemTimestamp`, `ReplayerTopicoDesconhecido`, `ReplayerPausaFalhou`, `ReplayerRetomadaFalhou`, `ReplayerDevolucaoFalhou` |
+| Ciclo de vida worker | `WorkerIniciado`, `WorkerEncerrando`, `WorkerEncerrado`, `WorkerInterrompido`, `WorkerLimiteAtingido`, `WorkerParando`, `WorkerSemConexao` |
+| Dispatcher           | `BrokerDesconhecido`                                                                              |
 
 `PedidoCriado` **não** aparece nessa lista: é o nome do contrato
 (`contracts.EVENTO_PEDIDO_CRIADO`), não um evento de log — o evento de
@@ -1054,49 +1178,71 @@ publicação que o produtor emite é `PedidoPublicado`.
 
 ### Defeitos de medição encontrados (e corrigidos)
 
-Os três maiores problemas desta aula não foram no sistema de mensageria — foram
+Os problemas mais sérios desta aula não foram no sistema de mensageria — foram
 **no próprio instrumento de medição**, e vale registrá-los porque é o que
 transforma um relatório em evidência:
 
 1. **A API grava `falha` antes de publicar na DLQ.** A medição original usava
-   `sleep(2)` entre "API disse `falha`" e "ler as filas". Capturado com
-   snapshots finos, o instante do `falha` é `t+68,1s` com `DLQ=0, retry.3=1` — a
-   mensagem ainda estava na última fila de retry. Com o sleep, o relatório ora
-   diria `dlq=0`, ora `dlq=1`. **Corrigido**: `aguardar_mensagem_na_dlq()`
-   pergunta ao broker até a mensagem aparecer, e reporta quanto esperou
-   (1,04 s e 1,55 s nas rodadas pareadas de 3 e 1 consumidor).
-2. **Throttling absorvido em silêncio.** O `docker compose up --scale worker=3`
+   `sleep(2)` entre "API disse `falha`" e "ler a fila". Capturado com snapshots
+   finos, o instante do `falha` é `t+68,1s` com `DLQ=0, retry.3=1` — a mensagem
+   ainda estava na última fila de retry. Com o sleep, o relatório ora diria
+   `dlq=0`, ora `dlq=1`. **Corrigido**: `aguardar_mensagem_na_dlq()` pergunta ao
+   broker até a mensagem aparecer, e reporta quanto esperou (7,92 s na rodada
+   com Kafka, porque a mensagem estava na retenção do degrau 3).
+2. **Medir vazão pelo relógio do próprio script mede o script.** A primeira
+   tentativa publicava uma rajada e ficava fazendo `GET /pedidos/{id}` a cada
+   ~20 ms. Resultado: **1,0 ped/s** com 1 consumidor. O log do worker da mesma
+   janela provava 20/s (gap p50 de **46 ms** entre mensagens processadas). O
+   `GET` custa ~0,8 s nesta pilha, então o instrumento era mais lento que a
+   coisa medida. **Corrigido**: a vazão do consumidor é medida pelo **offset
+   confirmado do grupo**, que é número do broker.
+3. **O gerador publicava mais do que pedia.** Com o loop de publicação contando
+   a cada iteração em vez de a cada `N`, a primeira rajada pediu 60 e publicou
+   64 — e o relatório dizia "64/60", o que denuncia a falha mas só depois de
+   ela estar no número. **Corrigido**: o gerador guarda a contagem por lock e
+   o alvo vem da marca d'água lida depois da publicação, nunca de um contador
+   paralelo.
+4. **O intervalo dinâmico do Windows tem só 1000 portas.** A carga roda dentro
+   do container (`docker compose exec`), porque o host abre e fecha conexões
+   para `localhost:8000` tão rápido que esgota `10000-10999` e falha com
+   `WinError 10048`.
+5. **Throttling absorvido em silêncio.** O `docker compose up --scale worker=3`
    recriou a API com `DRF_USER_RATE` no padrão (100/min) porque a variável não
-   existia naquele shell. 11 respostas 429 (18 s de espera cada) empurraram a
-   latência média da carga para **53 s**, contra ~4,5 s na rodada limpa — e o
-   relatório saía limpo e bonito. **Corrigido**: todo 429 é contado, e a
-   execução sai com código 1 e um aviso se passar de `--tolerar-429` (padrão 0).
-3. **`RemoteDisconnected` não é `URLError`.** Derrubar a API no meio da carga
-   (o próprio teste de caos) matava o harness com traceback. **Corrigido**:
-   `OSError`/`http.client.HTTPException` entram na mesma fila de retentativa,
-   em contador separado do 429 (indisponibilidade é esperada no teste de caos e
-   não invalida a medição).
-4. **Comparar execuções de sessões diferentes.** Detalhado em "Por que os
-   números foram medidos de novo, em pares": o mesmo código rendeu 9,29 e 7,23
-   ped/s em duas rodadas de 1 consumidor, e a comparação entre sessões teria
-   inventado um ganho de vazão com 3 consumidores que não existe. **Corrigido**:
-   as duas colunas da tabela vêm de rodadas encostadas, e ambas reportam
-   `respostas_429: 0`.
+   existia naquele shell. 11 respostas 429 empurraram a latência média da carga
+   para **53 s**, contra ~4,5 s na rodada limpa — e o relatório saía limpo.
+   **Corrigido**: todo 429 é contado, e a execução sai com código 1 e um aviso
+   se passar de `--tolerar-429` (padrão 0).
+6. **`RemoteDisconnected` não é `URLError`.** Derrubar a API no meio da carga
+   matava o harness com traceback. **Corrigido**: `OSError`/
+   `http.client.HTTPException` entram na mesma fila de retentativa, em contador
+   separado do 429.
+7. **Rebalance registrado como falha de commit.** `ILLEGAL_GENERATION` no
+   commit durante `--scale` é o protocolo funcionando, não defeito. Detalhado
+   em "At-least-once: worker morto e rebalance".
 
 ### Comandos úteis (Aulas 9 e 10)
 
 ```powershell
-# Verificar topologia e logs do worker
-docker compose logs -f worker
+# Estado do broker: tópicos, retenção, offsets confirmados e lag por partição
+docker compose exec api python api/manage.py declarar_topicos_kafka
+
+# Verificar o que ficou preso na DLQ (lê sem consumir)
+docker compose exec api python api/manage.py inspecionar_dlq_kafka
+
+# Devolver as mensagens da DLQ ao tópico principal (ação destrutiva)
+docker compose exec api python api/manage.py inspecionar_dlq_kafka --reprocessar
+
+# Logs do worker
+docker compose logs -f worker-kafka
 
 # Escalar consumidores (o service não tem container_name de propósito)
-docker compose up -d --scale worker=3
+docker compose up -d --scale worker-kafka=3
 
 # Recuperar pedidos em pendente_publicacao
 docker compose exec api python api/manage.py republicar_pedidos --dry-run
 docker compose exec api python api/manage.py republicar_pedidos
 
-# Medição completa (latência, idempotência, vazão, DLQ, consumidores)
+# Medição completa (latência, idempotência, vazão, DLQ, offsets)
 .venv\Scripts\python.exe scripts\measure_messaging.py --purgar --pedidos 20 `
     --duplicatas 3 --forcar-falha 1 --carga 60 --concorrencia 8 --inspecionar-dlq
 
@@ -1105,19 +1251,326 @@ docker compose exec api python api/manage.py republicar_pedidos
     --duplicatas 0 --forcar-falha 0 --carga 60 --concorrencia 8
 
 # Resumo do log transacional
-docker compose logs --no-color worker > logs_worker.jsonl
+docker compose logs --no-color --no-log-prefix worker-kafka > logs_worker.jsonl
 .venv\Scripts\python.exe scripts\measure_messaging.py --analisar-logs logs_worker.jsonl
 
 # Dedupe degradado (fail-open)
 docker compose stop redis
 .venv\Scripts\python.exe scripts\measure_messaging.py --purgar --pedidos 10 --duplicatas 3
 docker compose start redis
+
+# RabbitMQ da Aula 9, por profile (a API precisa nascer com o mesmo broker)
+$env:MENSAGERIA_BROKER='rabbitmq'
+docker compose --profile rabbitmq up -d rabbitmq worker
 ```
+
+### Recuperação quando o broker está fora
+
+O `POST /pedidos/` **não depende do broker estar no ar**: se a publicação falha,
+o pedido fica gravado com `status = pendente_publicacao` e a API responde
+**503** com o motivo. Medido:
+
+| Passo | Resultado |
+| ----- | --------- |
+| `docker compose stop kafka` e `POST /pedidos/` | **HTTP 503**, `status = pendente_publicacao` no banco |
+| `docker compose start kafka` | broker volta |
+| `manage.py republicar_pedidos` | pedido 2796 publicado em `pedidos.criados` (offset 592) |
+| worker consome | `status = processado`, `tentativas = 1` |
+
+Ou seja, o broker indisponível custa um **503 honesto e recuperável**, não um
+pedido fantasma.
 
 > Nota: o throttle é irrelevante para quem não mede, então **não** se elevou
 > `DRF_USER_RATE` no `docker-compose.yml` — a medição eleva por variável de
 > ambiente, no mesmo comando do `up`, e o harness se recusa a publicar números
 > contaminados por 429.
+
+
+## Pagamento, notificação e o segundo fluxo Kafka (Aula 11)
+
+O DoD da Aula 11 é um caminho de três passos: **criar pedido ➔ simular pagamento
+➔ notificar**. O que a aula acrescenta não é o caminho — é que o pagamento é
+**outro fluxo de eventos**, com tópico, grupo, offsets, retries e DLQ próprios.
+
+```
+POST /pedidos/            POST /pedidos/{id}/pagamento/     worker-pagamentos
+      │                            │                                │
+      ▼                            ▼                                ▼
+pedidos.criados          pagamentos.registrados            UPDATE condicional
+      │                            │                    (pagamento.status) +
+      │                            │                    INSERT notificacao
+      ▼                            │                                │
+worker-kafka                           │                                │
+      │                            │                                │
+UPDATE pedido.status  ──► notificado_em preenchido ◄────────────────────┘
+```
+
+O `worker-kafka` continua tratando só de pedidos e o `worker-pagamentos` só de
+pagamentos. Nenhum dos dois enxerga o tópico do outro.
+
+### Por que dois fluxos e não dois tipos de evento no mesmo tópico
+
+Poderia ser `pedidos.criados` com dois tipos de evento. Não é, e a razão é
+operacional:
+
+| Se fosse o mesmo tópico | O que acontece |
+| ------------------------ | -------------- |
+| Um consumidor só | processa pedido **e** pagamento; o worker de pagamento nunca roda |
+| Dois consumidores | as partições são **disputadas**: cada worker lê metade dos eventos do outro fluxo, e metade dos pedidos não é processada por quem deveria |
+| Uma DLQ só | "o que está preso?" exige inspecionar os dois fluxos para responder |
+
+Com tópicos separados, cada fluxo tem consumidor, paralelismo
+(`KAFKA_PARTICOES_PAGAMENTOS`), offset, dedupe e DLQ próprios — e o `--fluxo`
+dos comandos de administração diz qual dos dois você está olhando.
+
+O que os dois fluxos **compartilham** é a política de reentrega (`5,15,45 s`,
+máximo 3) e o replayer. Estado, não é.
+
+### Subir o ambiente
+
+```powershell
+# 1. sobe API + os dois workers + kafka, redis, db e inventory
+docker compose up -d --build
+
+# 2. cria a topologia dos DOIS fluxos (idempotente: pode repetir).
+#    Precisa da API no ar: o comando roda dentro do container `api`.
+docker compose exec api python api/manage.py declarar_topicos_kafka
+
+# 3. confere que os dois fluxos estão de pé
+curl.exe http://localhost:8000/health
+```
+
+```powershell
+# estado do broker de um fluxo por vez
+docker compose exec api python api/manage.py declarar_topicos_kafka --fluxo pagamentos --json
+docker compose exec api python api/manage.py inspecionar_dlq_kafka --fluxo pagamentos
+```
+
+Os sete serviços do Compose: `api`, `inventory`, `worker-kafka`,
+`worker-pagamentos`, `kafka`, `db` e `redis`. O RabbitMQ continua como profile
+alternativo da Aula 9 e serve **apenas** ao fluxo de pedidos.
+
+### A flag de falha injetada (leia antes de demonstrar a DLQ)
+
+`PEDIDO_PERMITIR_SIMULACAO_FALHA` e `PAGAMENTO_PERMITIR_SIMULACAO_FALHA` estão
+ligadas (`true`) por padrão no Compose, e as duas são consultadas **pela API**: a
+view decide se aceita o header `X-Simular-Falha` e grava `simular_falha` no
+registro. O worker não lê flag nenhuma: ele honra a marcação gravada no banco.
+
+Com a flag desligada o header é **ignorado em silêncio** (o POST segue normal e
+`simular_falha` fica `false`), que é o comportamento correto fora de
+desenvolvimento: um cliente não deve poder sabotar o próprio pedido.
+
+Os dois interruptores são separados porque a falha injetada leva a mensagem para
+a **DLQ do seu fluxo**. Misturar as duas sabotagens no mesmo interruptor
+tornaria "qual fluxo parou?" mais difícil de responder do que precisava.
+
+### Endpoints novos
+
+| Método | Rota | Quem | Devolve |
+| ------ | ---- | ---- | ------- |
+| `POST` | `/api/v1/pedidos/{id}/pagamento/` | dono do pedido | **201** com o pagamento em `registrado` e o bloco `evento` (tópico, partição, offset) |
+| `GET` | `/api/v1/pedidos/{id}/pagamento/` | dono ou admin | o pagamento, com o desfecho que o **worker** gravou |
+| `GET` | `/api/v1/notificacoes/` | dono (só as suas) ou admin (todas) | lista paginada, filtrável por `pedido` e `canal` |
+
+Matriz de permissões da notificação:
+
+| Verbo | Anônimo | user | admin |
+| ----- | -------- | ---- | ----- |
+| `GET /notificacoes/` | 401 | só as do próprio pedido | todas |
+
+O corpo do `POST` decide o **método** e o **desfecho** do gateway simulado:
+`metodo` (`pix`, `cartao_credito`, `boleto`), `aprovado`, `motivo_recusa`
+(**obrigatório** quando `aprovado` é `false`, proibido quando é `true`) e
+`canal` (`email`, `sms`, `push`; padrão `email`).
+
+### O `status` do pagamento não muda na API
+
+O `POST` responde `201` com `status: registrado` e o bloco `evento`. Esse
+`registrado` é estado **local do produtor** — a linha foi criada e o evento foi
+confirmado pelo broker. Quem vira `aprovado`/`recusado` é o worker, aplicando o
+efeito do evento; é por isso que a transição é um `UPDATE` **condicional** no
+worker, e não um `UPDATE` na API (que deixaria o `UPDATE` condicional sem linhas
+para casar e a notificação nunca seria criada).
+
+Então, logo depois do `POST`, um `GET` ainda devolve `registrado` — isso é o
+funcionamento normal, não uma falha:
+
+> **As barras invertidas no `-d` não são um erro de digitação.** No PowerShell
+> 5.1, `-d '{"metodo": "pix"}'` chega na API como `{metodo: pix}` e a resposta é
+> `JSON parse error`. As aspas duplas dentro de um argumento de executável nativo
+> precisam ser escapadas (`\"`), como nos exemplos abaixo. Alternativas que não
+> precisam de escape: `--%` (stop-parsing) ou `Invoke-RestMethod` com `-Body`.
+
+```powershell
+# 1. paga
+curl.exe -X POST http://localhost:8000/api/v1/pedidos/5120/pagamento/ `
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" `
+  -d '{\"metodo\": \"pix\", \"aprovado\": true, \"canal\": \"email\"}'
+# {"status":"registrado", ..., "evento":{"topico":"pagamentos.registrados","fluxo":"pagamentos","chave":"5120","particao":1,"offset":1}}
+
+# 2. alguns segundos depois, o worker aplicou o efeito
+curl.exe http://localhost:8000/api/v1/pedidos/5120/pagamento/ -H "Authorization: Bearer $TOKEN"
+# {"status":"aprovado", "aprovado":true, "notificado_em":"2026-...", ...}
+```
+
+Medido nesta aula (pedido 5120, `R$ 699.30`, PIX, canal email):
+
+| Passo | Resultado |
+| ----- | --------- |
+| `POST /pedidos/` | `201`, `status=processado` (worker-kafka), total `699.30` |
+| `POST /pedidos/5120/pagamento/` | `201`, `status=registrado`, `evento.chave=5120` (o **`pedido_id`**, não o `pagamento_id`) |
+| ~7 s depois, `GET` do pagamento | `status=aprovado`, `notificado_em` preenchido |
+| `GET /notificacoes/?pedido=5120` | `count: 1` — *"Seu pagamento de R$ 699.30 via PIX foi aprovado."* |
+
+E o caminho da recusa (pedido 5121, `R$ 899.10`, cartão de crédito, SMS):
+`status=recusado`, uma notificação, *"Seu pagamento de R$ 899.10 via cartão de
+crédito foi recusado: saldo insuficiente"*, no canal `sms`.
+
+### Re-POST: mesma tentativa republica, outra tentativa é 409
+
+`Pagamento.pedido` é `OneToOne` — um pedido aceita **um** pagamento. O re-POST
+bate no `IntegrityError` do banco, e quem decide o que responder é a
+`idempotency_key` (SHA-256 de **pedido + método + desfecho**), não o
+`IntegrityError`, que só diz que *já existe algum pagamento*:
+
+| Re-POST | Resposta | Porquê |
+| ------- | -------- | ------ |
+| mesmo método, mesmo desfecho, ainda `registrado` | `200`, `republicado: true` | a cura do `503`: republica o evento perdido |
+| mesmo método, mesmo desfecho, já resolvido | `200`, `republicado: false`, `evento.duplicado: true` | o gateway já respondeu; publicar de novo criaria uma **segunda** notificação para um fato já notificado |
+| **método ou desfecho diferente** | **`409`** + `pagamento_existente` | é outra tentativa, e o `OneToOne` a impede |
+| `aprovado: false` sem `motivo_recusa` | `400` | a coerência do desfecho é validada **na entrada** |
+
+O `409` é o caso que dá sentido aos outros: sem comparar a chave, um `POST` com
+`metodo: "boleto"` contra um pedido já pago com PIX devolvia `200` e o
+pagamento em PIX — o cliente recebia um "deu certo" para um pedido que não
+tentou fazer.
+
+### Idempotência sob reentrega e replay
+
+Três barreiras, nesta ordem: janela no **Redis** (`SET NX EX`), `UPDATE`
+condicional no **PostgreSQL** e unicidade de `Notificacao.pagamento` (`OneToOne`).
+A chave de dedupe é prefixada pelo nome do fluxo, então pagamento e pedido não
+colidem.
+
+Medido: cinco cópias do mesmo `PagamentoRegistrado` republicadas produziram
+**uma** notificação. O Redis descartou as duplicatas; apagando a key do Redis à
+mão, foi o `UPDATE` condicional que descartou — e a contagem continuou em 1, com
+o pagamento inalterado.
+
+### Falha injetada, escada e DLQ deste fluxo
+
+```powershell
+curl.exe -X POST http://localhost:8000/api/v1/pedidos/5124/pagamento/ `
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" `
+  -H "X-Simular-Falha: 1" -d '{\"metodo\": \"pix\", \"aprovado\": true}'
+
+# em outro terminal
+docker compose logs -f worker-pagamentos
+```
+
+O header grava `simular_falha` no pagamento (**não** viaja no evento: o worker
+lê do banco) e o consumidor levanta `FalhaInjetada`, uma exceção recuperável.
+O que esperar:
+
+| Momento | Banco | Log |
+| ------- | ----- | ---- |
+| t = 0 | `status=registrado`, `tentativas=1` | `PagamentoFalha`, `motivo: reentrega 1/3 em 5s` |
+| t ≈ 6 s | `tentativas=2` | `PagamentoFalha`, `reentrega 2/3 em 15s` |
+| t ≈ 22 s | `tentativas=3` | `PagamentoFalha`, `reentrega 3/3 em 45s` |
+| t ≈ 67 s | `tentativas=4`, **sem notificação** | `PagamentoDlq` |
+
+Os intervalos entre as mensagens medidos foram 6,7 s e 16,3 s para backoffs
+declarados de 5 s e 15 s — a espera acontece **no tópico**, não num `sleep` do
+worker.
+
+Repare que **não existe** `status = falha` no `Pagamento`: o pedido continua
+`processado`, e quem continua pendente é o **aviso**, que não foi criado.
+
+Reprocessar a DLQ:
+
+```powershell
+# inspecionar sem consumir
+docker compose exec api python api/manage.py inspecionar_dlq_kafka --fluxo pagamentos
+
+# devolver ao tópico principal
+docker compose exec api python api/manage.py inspecionar_dlq_kafka --fluxo pagamentos --reprocessar
+```
+
+O `--reprocessar` **descarta o `x-tentativa`** que veio da DLQ. Sem esse
+reset, a mensagem volta com a escada já esgotada: o worker a processa uma vez e
+a manda direto de volta para a DLQ, enquanto o comando reporta "1 mensagem
+devolvida ao tópico principal". O sintoma — uma mensagem na DLQ que ninguém
+colocou lá — não aponta para o header. O `x-motivo` também sai: ele descreve a
+falha **daquela** tentativa.
+
+> **"vazia" no `inspecionar` não significa "topico vazio".** As duas coisas
+> medem coisas diferentes, e depois de um `--reprocessar` elas discordam de forma
+> que parece bug:
+>
+> | Onde | O que mede | Situação depois de reprocessar as 4 mensagens |
+> | ---- | ---------- | ------------------------------------------- |
+> | `inspecionar_dlq_kafka` | o que o **grupo de inspeção** ainda não tratou (`synapseshop-dlq-inspecao-<fluxo>`) | `vazia` — o `--reprocessar` confirmou o offset, então não há o que ler |
+> | `declarar_topicos_kafka --json` | o que o **tópico** ainda retém (`mensagens`) | `4` — o tópico é append-only |
+>
+> Reprocessar **devolve** a mensagem ao tópico principal; ela não sai da DLQ.
+> Como a retenção da DLQ é de 30 dias, as 4 mensagens ficam lá até expirarem.
+
+Medido: pedido 5115 com `X-Simular-Falha`, escada esgotada, `simular_falha`
+limpo no banco e evento reprocessado — o worker aprovou, criou **uma**
+notificação e a DLQ ficou vazia.
+
+### Observabilidade dos dois fluxos
+
+O `/health` devolve a **topologia completa** de cada fluxo em `fluxos` (tópico,
+grupo, partições, retenção, tópico de DLQ, grupo de replay, a escada de
+`topicos_retry` e `max_reentregas`):
+
+```powershell
+curl.exe http://localhost:8000/health
+```
+
+Agrupar por fluxo continua valendo, mas o detalhe não pode sumir: quem depura
+pagamento precisa do estado do fluxo de pagamento, e o `/health` é a rota que
+responde antes de qualquer outra quando algo trava.
+
+O que o `/health` **não** traz é `lag`, offset confirmado e contagem de DLQ, e
+isso é deliberado: o Compose o usa como `healthcheck` do container, então ler os
+watermarks dos tópicos a cada sondagem transformaria o endpoint de liveness em
+carga no broker. Para o estado que se move:
+
+```powershell
+# offsets, lag e tamanho da DLQ de um fluxo
+docker compose exec api python api/manage.py declarar_topicos_kafka --fluxo pagamentos --json
+
+# só a DLQ
+docker compose exec api python api/manage.py inspecionar_dlq_kafka --fluxo pagamentos
+```
+
+Campos de log que só existem **por** haver dois fluxos: `fluxo` (qual stream a
+linha veio — é o que permite filtrar `worker-kafka` e `worker-pagamentos` com o
+mesmo `grep`) e `pagamento_id`. `pedido_id` sozinho não identifica a entidade:
+um pagamento e um pedido de mesmo número coexistem. Os eventos de log do fluxo
+ganham o prefixo `Pagamento` (`PagamentoProcessado`, `PagamentoDuplicado`,
+`PagamentoFalha`, `PagamentoDlq`, `PagamentoPublicado`,
+`PagamentoPublicacaoFalhou`); o laço de consumo é o mesmo dos dois fluxos.
+
+### O que **não** foi feito (Anti-Hallucination)
+
+A spec é explícita sobre não antecipar as aulas seguintes, e nada abaixo entrou:
+
+* **nenhum** teste automatizado e **nenhuma** pipeline de CI/CD;
+* **nenhum** dashboard ou extração de dados (o `Notificacao` foi modelado
+  pensando nisso, mas é isso: uma tabela com índice, não um relatório);
+* **nenhuma** IA, recomendação ou integração com serviço externo;
+* o RabbitMQ **não** ganhou o segundo fluxo — implementá-lo exigiria uma
+  topologia AMQP equivalente, e fingir que os dois brokers têm a mesma coisa
+  seria mentir sobre a assimetria.
+
+### Ficheiros da aula
+
+* Contrato do evento: [`docs/contracts/pagamento_registrado.md`](docs/contracts/pagamento_registrado.md)
+* Coleção Postman (21 requests, na ordem do DoD): [`collections/synapseshop_aula11.postman_collection.json`](collections/synapseshop_aula11.postman_collection.json)
 
 
 ## Referências

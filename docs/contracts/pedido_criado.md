@@ -69,7 +69,7 @@ Este documento descreve o **evento de domínio** publicado pela API assim que um
 
 ## 5. Validação e tratamento de erros
 
-O consumidor (`core.messaging.consumidor`) valida **estritamente** o payload com `core.messaging.contracts.validar_evento`:
+O consumidor (`core.messaging.kafka_consumidor`) valida **estritamente** o payload com `core.messaging.contracts.validar_pedido_criado`:
 
 1. **Tipo**: objeto JSON.
 2. **Top-level**: `evento`, `versao`, `evento_id`, `idempotency_key`, `origem`, `ocorrido_em`, `publicado_em`, `pedido`.
@@ -80,16 +80,43 @@ O consumidor (`core.messaging.consumidor`) valida **estritamente** o payload com
 
 ## 6. Publicação e entrega
 
+O transporte padrão é o **Apache Kafka** (Aula 10); o RabbitMQ da Aula 9
+continua como implementação alternativa, escolhida por `MENSAGERIA_BROKER`. O
+payload é **idêntico nos dois** — muda a topologia, não o contrato.
+
+### Kafka (padrão)
+
+* **Tópico principal**: `pedidos.criados`, com **3 partições**. A chave de
+  produção é `str(pedido.id)`, então todos os eventos do mesmo pedido caem na
+  mesma partição e a ordem por pedido é preservada.
+* **Retenção**: `retention.ms` por tópico — 7 dias no principal
+  (`KAFKA_RETENCAO_MS`), 30 dias na DLQ (`KAFKA_RETENCAO_DLQ_MS`).
+* **Confirmações**: `acks=all` com `enable.idempotence=true`, e `flush()` antes
+  do 201. O POST só responde **201** depois do broker confirmar. Se a
+  confirmação falhar, o pedido fica em `status = pendente_publicacao` e a API
+  responde **503** com instrução para `manage.py republicar_pedidos`.
+* **Consumo**: `enable.auto.commit=false` e `enable.auto.offset.store=false`. O
+  offset é confirmado (`commit(message=…)`, síncrono) só **depois** do efeito
+  aplicado. Um consumidor por partição no máximo.
+* **Producer singleton** por processo: abrir um `Producer` por POST custa ~30 ms
+  de conexão, e o cliente único reaproveitado é o que faz o POST cair de ~1,4 s
+  para ~160 ms.
+
+### RabbitMQ (alternativa, profile `rabbitmq`)
+
 * **Exchange**: `pedidos` (tipo `topic`), routing key `pedido.criado`.
-* **Fila principal**: `pedidos.criados` (durável), DLX `pedidos.dlx` com routing key `pedido.criado` (fallback caso o consumidor rejeite sem routing key explícita).
-* **Confirmações**: produtor usa **publisher confirms** (`channel.confirm_delivery()`). O POST só responde **201** depois do broker confirmar a publicação. Se a confirmação falhar, o pedido permanece em `status = pendente_publicacao` e a API responde **503** com instrução para executar `manage.py republicar_pedidos`.
-* **Durabilidade**: exchanges e filas são duráveis; as mensagens são persistentes (padrão do `basic_publish` com `delivery_mode=2` implícito via persistência da fila).
+* **Fila principal**: `pedidos.criados` (durável), DLX `pedidos.dlx` com routing
+  key `pedido.criado` (fallback caso o consumidor rejeite sem routing key
+  explícita).
+* **Confirmações**: `channel.confirm_delivery()`; o POST só responde 201 depois
+  da confirmação.
+* **Durabilidade**: exchanges e filas duráveis, mensagens persistentes.
 
 ## 7. Idempotência (ponta a ponta)
 
 A chave viaja no evento e é usada em **duas barreiras**, independentes:
 
-* **Barreira 1 — Redis (db 0), janela de idempotência**: `dedupe.reservar(evento)` faz `SET key NX EX ttl` (TTL configurável). Se a chave já existe → mensagem é **duplicata**: `ack` sem aplicar efeito, log `PedidoDuplicado`.
+* **Barreira 1 — Redis (db 0), janela de idempotência**: `dedupe.reservar(evento)` faz `SET key NX EX ttl` (TTL configurável). Se a chave já existe → mensagem é **duplicata**: confirmação de offset (ou `ack`) sem aplicar efeito, log `PedidoDuplicado`.
 * **Barreira 2 — PostgreSQL**: `UPDATE` condicional com filtro `status__in(ESTADOS_PROCESSAVEIS)` **e** `idempotency_key = evento.idempotency_key`. Resultado 0 linhas:
   * se o pedido já está `processado` → duplicata real, log `PedidoDuplicado` (efeito já aplicado).
   * se a chave não confere com o pedido → `MensagemIncorreta` → **DLQ** (terminal).
@@ -99,53 +126,57 @@ A janela do Redis evita reprocessar a mesma mensagem enquanto ela ainda está "e
 
 ## 8. Reentregas e DLQ
 
-* **Tentativa inicial**: `tentativa = 0` (header AMQP **`x-tentativa`**, nome exato em `core.messaging.topologia.HEADER_TENTATIVA`; era `x-pedido-tentativa` em rascunhos antigos e foi corrigido para não duplicar o prefixo do app).
-* **Backoff**: em caso de exceção recuperável, a mensagem é republicada para `pedidos.criados.retry.{d}` com TTL em segundos `5,15,45` (configuráveis via `.env`). Ao expirar o TTL, a fila de retry redireciona a mensagem de volta à fila principal (`x-dead-letter-exchange: pedidos`, `x-dead-letter-routing-key: pedido.criado`), com o header de tentativa incrementado.
-* **Escada**: `max_reentregas = 3` → até 3 reentregas após a tentativa inicial (total de 4 passagens). Configurado por `PEDIDO_MAX_REENTREGAS` e `PEDIDO_BACKOFF_SEGUNDOS`.
-* **DLQ**: se `tentativa >= max_reentregas` **OU** política inconsistente (faltam degraus) **OU** `ContratoInvalido` **OU** `MensagemIncorreta` → a mensagem é enviada para `pedidos.criados.dlq` (exchange `pedidos.dlx`, routing key `pedido.criado`) e o consumidor faz `ack`. Quando vai para DLQ por tentativas esgotadas, o pedido é marcado como `status = falha` e `motivo_falha` registra a última exceção (truncada a 200 caracteres).
+* **Tentativa inicial**: `tentativa = 0` (header **`x-tentativa`**,
+  `core.messaging.kafka_topologia.HEADER_TENTATIVA`). No RabbitMQ é um header
+  AMQP; no Kafka, o mesmo par chave/valor nos headers da mensagem.
+* **Backoff**: em caso de exceção recuperável, a mensagem é publicada em
+  `pedidos.criados.retry.{d}` para `d = 1..3`.
+  * **Kafka**: o degrau é a **própria retenção do tópico**
+    (`610000 / 630000 / 690000 ms`, ou seja, 5/15/45 s + folga). O replayer
+    (`synapseshop-replay`) só lê o tópico e republica no principal quando o
+    offset da mensagem é anterior a `agora - backoff`; como a retenção expira
+    logo depois, a janela é curta. Não há timer no worker: reiniciá-lo não
+    reinicia a espera.
+  * **RabbitMQ**: `x-message-ttl` em segundos `5,15,45`, e a expiração
+    redireciona para a fila principal via `x-dead-letter-exchange`.
+* **Escada**: `max_reentregas = 3` → até 3 reentregas após a tentativa inicial
+  (total de 4 passagens). Com `X-Simular-Falha: 1`, o E2E medido terminou em
+  `status = falha` com `tentativas = 4` e a mensagem na DLQ.
+* **DLQ**: se `tentativa >= max_reentregas` **OU** política inconsistente (faltam
+  degraus) **OU** `ContratoInvalido` **OU** `MensagemIncorreta` → a mensagem vai
+  para `pedidos.criados.dlq` e o consumidor confirma o offset (ou faz `ack`).
+  Quando vai por tentativas esgotadas, o pedido é marcado como `status = falha`
+  e `motivo_falha` registra a última exceção (truncada em 200 caracteres).
 
-### Dois contadores de tentativa (e por que os dois existem)
+### `tentativas` no banco e passagens pela escada
 
-A mensagem que chega à DLQ carrega **dois** contadores, e eles não são
-redundantes:
+`Pedido.tentativas` conta **as passagens totais**, e é por isso que o valor
+final é **4**, não 3: a tentativa inicial também é contada. Um defeito
+corrigido nesta aula contava a falha terminal duas vezes (o `UPDATE` de
+`falha` incrementava e a publicação na DLQ incrementava de novo), o que
+produzia `tentativas = 5` para 4 passagens. A lição: um contador de
+tentativas que é escrito em dois lugares para o mesmo evento vai acabar
+contando errado, e o banco precisa ser a única fonte.
 
-| Header        | Quem escreve                                                  | O que conta                                                                 |
-| ------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `x-tentativa` | **a aplicação**, a cada republicação (`com_tentativa`)          | quantas vezes a aplicação escolheu reentregar                               |
-| `x-death`     | **o próprio RabbitMQ**, a cada expiração de TTL                | quantas vezes a mensagem passou por uma fila com TTL (uma por degrau)       |
+### Auditoria da passagem (Kafka)
 
-Medição real da mensagem retida na DLQ (leitura sem consumo pela management
-API, `ack_requeue_true`):
+No Kafka **não** existe equivalente ao `x-death` do RabbitMQ: a retenção não
+"devolve" a mensagem, ela apaga. A auditoria passa a ser o **timestamp do
+broker** gravado no header `x-timestamp-ms` a cada republicação, mais o evento
+de log `RetryLiberada` com `espera_ms` — que mede o tempo que o degrau segurou a
+mensagem de fato:
 
 ```json
-{
-  "x-tentativa": 3,
-  "x-motivo": "FalhaInjetada: falha injetada (X-Simular-Falha): pedido marcado para falhar",
-  "x-death": [
-    {"count": 1, "exchange": "pedidos.retry", "queue": "pedidos.criados.retry.3", "reason": "expired", "routing-keys": ["retry.3"]},
-    {"count": 1, "exchange": "pedidos.retry", "queue": "pedidos.criados.retry.2", "reason": "expired", "routing-keys": ["retry.2"]},
-    {"count": 1, "exchange": "pedidos.retry", "queue": "pedidos.criados.retry.1", "reason": "expired", "routing-keys": ["retry.1"]}
-  ]
-}
+{"evento": "RetryLiberada", "resultado": "ok", "degrau": 2,
+ "topico": "pedidos.criados.retry.2", "espera_ms": 15009,
+ "mensagem": "degrau de reentrega expirado; republicando"}
 ```
 
-`x-tentativa = 3` (as três reentregas que a aplicação pediu) e três entradas de
-`x-death` com `reason: expired` (as três filas de retry por onde a mensagem
-expirou de fato) — 1 tentativa inicial + 3 reentregas = 4 passagens, como
-projeta `PEDIDO_MAX_REENTREGAS=3`. O `x-death` é gerado pelo broker, então
-serve de **auditoria independente**: se algum dia a aplicação errar o
-`x-tentativa`, a diferença entre os dois contadores denuncia.
-
-> O bloco acima é o header AMQP cru. O `--inspecionar-dlq` do
-> `scripts/measure_messaging.py` resume as mesmas entradas em
-> `{"fila", "motivo", "contagem", "trocada_por"}` (o `trocada_por` é o `exchange`
-> desta linha), na ordem inversa — primeiro o degrau mais recente. Os números
-> batem: `x_tentativa: 3` e três degraus `retry.3/retry.2/retry.1` com
-> `motivo: expired`.
-
-A **DLQ é terminal por construção**: declarada sem `x-message-ttl` e **sem**
-`x-dead-letter-exchange`, para que a mensagem fique retida para inspeção (e
-reenfile manual) em vez de sumir ou de voltar para a escada.
+`espera_ms` de ~15 s no degrau 2 é a prova de que o backoff de 5/15/45 s
+acontece **no tópico**, e não num `sleep` do processo. A leitura da DLQ
+(`manage.py inspecionar_dlq_kafka`) devolve `particao`, `offset`, `tentativa`,
+`motivo`, `evento_id` e o payload, e **não confirma offset** — inspecionar não
+consome.
 
 ## 9. Simulação de falha (validação)
 
@@ -153,10 +184,48 @@ Para provar a escada ponta a ponta sem introduzir bugs artificiais no código de
 
 ## 10. Observabilidade
 
-* **Logs JSON** (`core.messaging`): eventos `MensagemRecebida`, `PedidoDuplicado`, `PedidoProcessado`, `PedidoFalha`, `PedidoDlq`, `PedidoPublicado`, `PedidoPublicacaoFalhou`, `TopologiaDeclarada`, `ReentregaFalhou`, `DedupeDegradado`, `MensagemEncerrada`, `WorkerIniciado`, `WorkerEncerrado`, `WorkerInterrompido`, `WorkerParando`, `WorkerSemConexao`, `DlqFalhou`, com `evento_id`, `pedido_id`, `chave_idempotencia`, `tentativa`, `atraso_fila_ms`, `duracao_ms` (quando aplicável). Erros de exceção são serializados com o **tipo** junto da mensagem (`descrever()`), porque `str(erro)` vem vazio em várias exceções do Python — o campo `erro: ""` não serve para diagnosticar nada.
-* **Métricas** (`core.messaging.metricas`): contadores por processo (`recebidas`, `processadas`, `duplicadas`, `falhas`, `reentregas`, `dlq`, `invalidas`).
-* **Healthchecks**: RabbitMQ (`rabbitmq-diagnostics -q ping`), Redis (`redis-cli ping`) e API/worker com `restart: unless-stopped` no `docker-compose.yml`.
-* **Análise agregada do log**: `scripts/measure_messaging.py --analisar-logs <arquivo>` resume o JSONL em contagem de eventos, distribuição de `duracao_ms`/`atraso_fila_ms` e distribuição de trabalho por instância de worker (é o que evidencia o round-robin entre consumidores concorrentes).
+* **Logs JSON** (`core.messaging`): **45 tipos de evento** (lista conferida
+  contra o código por grep de `"evento":`, não de memória). Ciclo da mensagem:
+  `MensagemRecebida`, `MensagemEncerrada`, `PedidoProcessado`,
+  `PedidoDuplicado`, `PedidoFalha`, `PedidoDlq`, `ErroConsumo`. Publicação:
+  `PedidoPublicado`, `PedidoPublicacaoFalhou`, `ProdutorCriado`,
+  `ProdutorFechando`. Topologia: `TopicosDeclarados`, `TopicosDescritos`,
+  `TopicosPurgados`, `OffsetsResetados`. Offset: `OffsetCommitFalhou`,
+  `OffsetCommitIgnorado`, `ReentregaFalhou`, `GruposIndisponiveis`. Replay:
+  `ReplayerIniciado`, `ReplayerConectado`, `RetryLiberada`, `RetryRetomado`,
+  `RetryAguardando`, `RetrySemTimestamp` e os `Replayer*` de falha. Worker:
+  `WorkerIniciado`, `WorkerEncerrando`, `WorkerEncerrado`, `WorkerParando`,
+  `WorkerInterrompido`, `WorkerLimiteAtingido`, `WorkerSemConexao`.
+  Campos: `evento_id`, `pedido_id`, `chave_idempotencia`, `tentativa`,
+  `particao`, `offset`, `atraso_fila_ms`, `duracao_ms`, `espera_ms`.
+* **`OffsetCommitIgnorado` é o commit recusado por rebalance**
+  (`ILLEGAL_GENERATION`/`REBALANCE_IN_PROGRESS`), não uma falha: a partição já
+  tem outro dono e quem confirma o offset é ele. Sai em INFO; só
+  `OffsetCommitFalhou` é ERROR.
+* **Métricas** (`core.messaging.metricas`): contadores por processo
+  (`recebidas`, `processadas`, `duplicadas`, `falhas`, `reentregas`, `dlq`,
+  `invalidas`).
+* **Healthchecks**: Kafka (`kafka-topics --bootstrap-server … --list`),
+  Redis (`redis-cli ping`), API/worker com `restart: unless-stopped`; o
+  RabbitMQ mantém `rabbitmq-diagnostics -q ping` no profile alternativo.
+* **Análise agregada do log**: `scripts/measure_messaging.py --analisar-logs
+  <arquivo>` resume o JSONL em contagem de eventos, distribuição de
+  `duracao_ms`/`atraso_fila_ms`/`espera_ms` e distribuição de trabalho por
+  instância **e por partição** (é o que evidencia a partição-por-consumidor).
+* **Idempotência sob replay** (o teste que vale a pena): o grupo
+  `synapseshop-pedidos` foi movido para `earliest` e as 4.120 mensagens da
+  retenção foram relidas — 4.064 foram reconhecidas como `PedidoDuplicado` e o
+  banco ficou **idêntico** (`processado = 4996`, `falha = 24` antes e depois).
+  * **O reset exige o grupo parado**: com consumidores no grupo o comando
+    `declarar_topicos_kafka --resetar-offsets` reporta sucesso e não move o
+    offset — o consumidor já tem a posição em memória e segue dela. Pare o
+    grupo, resete, suba de novo, e **confirme o offset** em
+    `declarar_topicos_kafka --json`.
+  * Replay de um histórico que contenha `X-Simular-Falha` **repopula a DLQ**,
+    porque `simular_falha` está no banco e a falha injetada roda de novo.
+* **Estado do broker**: `manage.py declarar_topicos_kafka --json` devolve
+  tópicos, retenção efetiva, e por consumer group o estado, membros e
+  `commit`/`lag` por partição.
 
 ## 11. Compatibilidade
 

@@ -1,0 +1,740 @@
+{
+  "info": {
+    "name": "SynapseShop - Aula 11 (pagamento, notificacao e o segundo fluxo Kafka)",
+    "description": "Percorre o Definition of Done da Aula 11 ponta a ponta: cria pedido, simula pagamento, coleta a notificacao e passa pelos casos que provam o desenho do segundo fluxo.\n\n**Ordem de execucao (Runner ou manualmente, de cima para baixo):**\n\n1. `Health e topologia` - confere que os DOIS fluxos estao de pe.\n2. `Autenticacao` - grava `token_user` e `token_admin`.\n3. `Pedido` - cria o pedido do pagamento aprovado (grava `pedido_id`) e o do pagamento recusado (grava `pedido_recusado_id`).\n4. `Pagamento - caminho feliz` - 201 e status `aprovado` gravado pelo worker.\n5. `Pagamento - recusa` - 201 e status `recusado`, notificado por SMS.\n6. `Idempotencia do re-POST` - mesma tentativa (200), outra tentativa (409), entrada invalida (400).\n7. `Falha injetada e DLQ` - a escada de reentrega deste fluxo (acompanhe com `docker compose logs -f worker-pagamentos`).\n8. `Permissoes` - quem ve quais notificacoes.\n\n**Antes de rodar**, suba o ambiente com `docker compose up -d --build`. O pedido do passo 3 precisa de um item ativo no catalogo: os SKUs desta colecao sao os do seed (`MED-0001` e `MED-0002`).\n\n**Tempos que a colecao nao controla:** entre o `POST /pagamento/` e o `GET` do pagamento passam alguns segundos (o pagamento so vira `aprovado` quando o `worker-pagamentos` aplica o efeito). Se o `GET` vier `registrado`, ainda nao rodou - espere e repita. O item `Falha injetada e DLQ` leva ~65 s ate a DLQ, porque a escada e 5s + 15s + 45s.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "token_user", "value": "" },
+    { "key": "token_admin", "value": "" },
+    { "key": "pedido_id", "value": "" },
+    { "key": "pedido_recusado_id", "value": "" },
+      { "key": "pedido_falha_id", "value": "" },
+    { "key": "pagamento_id", "value": "" },
+    { "key": "pagamento_falho_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health e topologia",
+      "description": "O `/health` da Aula 11 expoe o resumo dos DOIS fluxos. E a primeira coisa a olhar quando algo trava: se `pagamentos` sumiu do `fluxos`, o worker de pagamento nao esta lendo, e o sintoma la na frente (pagamento preso em `registrado`) nao aponta para la.",
+      "item": [
+        {
+          "name": "Health com os dois fluxos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "GET /health. Esperado: 200, `status: ok`, e `fluxos` com `pedidos` e `pagamentos` (topico, grupo, particoes, offsets confirmados, lag e DLQ de cada)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 e status ok', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json();",
+                  "pm.test('os dois fluxos estao no health', () => {",
+                  "  pm.expect(data.fluxos).to.have.property('pedidos');",
+                  "  pm.expect(data.fluxos).to.have.property('pagamentos');",
+                  "});",
+                  "console.log('fluxos:', JSON.stringify(data.fluxos));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Autenticacao",
+      "description": "Os testes gravam o access token em variaveis de colecao (`token_user`, `token_admin`). Todo o resto da colecao depende delas.",
+      "item": [
+        {
+          "name": "Login demo_user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.access) {",
+                  "  pm.collectionVariables.set('token_user', data.access);",
+                  "}",
+                  "pm.test('200 com access', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(data).to.have.property('access');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_user\",\n  \"password\": \"demo-user@Synapse2026\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "POST token. Esperado: 200 com access+refresh. O teste grava o access em `{{token_user}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Login demo_admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.access) {",
+                  "  pm.collectionVariables.set('token_admin', data.access);",
+                  "}",
+                  "pm.test('200 com access', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(data).to.have.property('access');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo_admin\",\n  \"password\": \"demo-admin@Synapse2026\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", ""]
+            },
+            "description": "POST token. Esperado: 200. O teste grava o access em `{{token_admin}}`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pedido",
+      "description": "O primeiro pedido vira o pagamento aprovado; o segundo, o recusado; o terceiro (do admin) fica reservado para a falha injetada - um pedido so aceita um pagamento, entao o caminho feliz ja consumiu o seu.",
+      "item": [
+        {
+          "name": "Criar pedido (pagamento vai ser aprovado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.id) {",
+                  "  pm.collectionVariables.set('pedido_id', data.id);",
+                  "}",
+                  "pm.test('201 e status pendente', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(data.status).to.eql('pendente');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itens\": [\n    { \"sku\": \"MED-0001\", \"quantidade\": 1 },\n    { \"sku\": \"MED-0002\", \"quantidade\": 1 }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", ""]
+            },
+            "description": "POST /pedidos. Esperado: 201 com `status: pendente` (o worker-kafka ainda vai virar `processado`). Total = 199.80 + 299.70 = 499.50. O teste grava o `id` em `{{pedido_id}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar pedido (pagamento vai ser recusado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.id) {",
+                  "  pm.collectionVariables.set('pedido_recusado_id', data.id);",
+                  "}",
+                  "pm.test('201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itens\": [\n    { \"sku\": \"MED-0003\", \"quantidade\": 1 }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", ""]
+            },
+            "description": "POST /pedidos para o caso de recusa. Esperado: 201 (total 399.60). O teste grava o `id` em `{{pedido_recusado_id}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar pedido do admin (reservado para a falha injetada)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.id) {",
+                  "  pm.collectionVariables.set('pedido_falha_id', data.id);",
+                  "}",
+                  "pm.test('201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_admin}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itens\": [\n    { \"sku\": \"MED-0001\", \"quantidade\": 1 },\n    { \"sku\": \"MED-0002\", \"quantidade\": 1 }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", ""]
+            },
+            "description": "POST /pedidos com o MESMO corpo do primeiro pedido, mas do `admin`. A chave de idempotencia do pedido inclui o dono, entao isso cria um pedido NOVO (`{{pedido_falha_id}}`) sem precisar inventar um item ou depender de estoque - e sem depender de `X-Simular-Falha`, que aqui marcaria o PAGAMENTO, nao o pedido.\n\nEste pedido existe para o cenario de falha injetada: um pedido so aceita um pagamento, e o primeiro ja foi pago no caminho feliz. Reaproveitar `{{pedido_id}}` ali devolveria 200/409 e a DLQ nunca encheria."
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar pedido ate virar processado",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_user}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_id}}", ""]
+            },
+            "description": "GET /pedidos/{{pedido_id}}. Esperado: 200 com `status: processado` e `processado_em` preenchido. Se vier `pendente`, o worker-kafka ainda nao leu: espere alguns segundos e repita."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pagamento - caminho feliz",
+      "description": "O POST responde 201 assim que o broker CONFIRMA a publicacao - o `status: registrado` que volta na resposta ainda nao e o desfecho. Quem vira `aprovado` e o `worker-pagamentos`, aplicando o efeito do evento.",
+      "item": [
+        {
+          "name": "Simular pagamento aprovado (PIX, email)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.id) {",
+                  "  pm.collectionVariables.set('pagamento_id', data.id);",
+                  "}",
+                  "pm.test('201 e ainda registrado', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(data.status).to.eql('registrado');",
+                  "  pm.expect(data.aprovado).to.be.true;",
+                  "});",
+                  "pm.test('o evento foi confirmado pelo broker', () => {",
+                  "  pm.expect(data.evento.broker).to.eql('kafka');",
+                  "  pm.expect(data.evento.fluxo).to.eql('pagamentos');",
+                  "  pm.expect(data.evento.particao).to.be.a('number');",
+                  "});",
+                  "pm.test('a chave Kafka e o pedido_id, nao o pagamento_id', () => {",
+                  "  pm.expect(String(data.evento.chave)).to.eql(String(data.pedido_id));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metodo\": \"pix\",\n  \"aprovado\": true,\n  \"canal\": \"email\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_id}}", "pagamento", ""]
+            },
+            "description": "POST do pagamento. Esperado: 201, `status: registrado`, e o bloco `evento` com topico `pagamentos.registrados`, `fluxo: pagamentos`, particao e offset. O teste grava `id` em `{{pagamento_id}}`.\n\nRepare que `canal: email` NAO aparece no corpo do evento aqui: `canal_notificacao` vive no evento publicado, e quem o persiste e a `Notificacao`, criada pelo worker."
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar pagamento ate virar aprovado",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_user}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_id}}", "pagamento", ""]
+            },
+            "description": "GET do pagamento. Esperado: 200 com `status: aprovado`, `aprovado: true` e `notificado_em` preenchido. Este e o estado que o WORKER gravou - a API nao muda esse campo.\n\nSe vier `registrado`, o worker ainda nao aplicou o efeito: espere e repita."
+          },
+          "response": []
+        },
+        {
+          "name": "Notificacao do pedido (1 registro)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('200 e exatamente 1 notificacao', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(data.count).to.eql(1);",
+                  "});",
+                  "pm.test('email, com pagamento e pedido linked', () => {",
+                  "  const n = data.results[0];",
+                  "  pm.expect(n.canal).to.eql('email');",
+                  "  pm.expect(n.pedido).to.eql(Number(pm.collectionVariables.get('pedido_id')));",
+                  "  pm.expect(n).to.have.property('pagamento');",
+                  "  console.log('titulo:', n.titulo, '| mensagem:', n.mensagem);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_user}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/notificacoes/?pedido={{pedido_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notificacoes", ""],
+              "query": [
+                { "key": "pedido", "value": "{{pedido_id}}", "description": "Filtro por pedido (exige `filterset_fields`)." }
+              ]
+            },
+            "description": "GET /notificacoes/?pedido=. Esperado: 200, `count: 1` - a notificacao que o worker criou. Se o count for 0, o worker ainda nao rodou; se for maior que 1, o idempotencia do fluxo quebrou."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pagamento - recusa",
+      "description": "A recusa e metade da aula: e o desfecho que mostra que o contrato carrega um `motivo_recusa` e que a notificacao muda de texto (e de canal) conforme o resultado.",
+      "item": [
+        {
+          "name": "Simular pagamento recusado (cartao, sms)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('201, recusado, com motivo', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(data.status).to.eql('registrado');",
+                  "  pm.expect(data.aprovado).to.be.false;",
+                  "  pm.expect(data.motivo_recusa).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metodo\": \"cartao_credito\",\n  \"aprovado\": false,\n  \"motivo_recusa\": \"saldo insuficiente\",\n  \"canal\": \"sms\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_recusado_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_recusado_id}}", "pagamento", ""]
+            },
+            "description": "POST do pagamento recusado. Esperado: 201 com `aprovado: false` e `motivo_recusa` preenchido.\n\n`motivo_recusa` e OBRIGATORIO aqui, e a regra ja e validada na entrada (400 se faltar) - e nao so no contrato. Sem motivo nao ha o que notificar ao cliente."
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar pagamento ate virar recusado",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_user}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_recusado_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_recusado_id}}", "pagamento", ""]
+            },
+            "description": "GET do pagamento recusado. Esperado: 200 com `status: recusado`, `aprovado: false` e `motivo_recusa: saldo insuficiente`."
+          },
+          "response": []
+        },
+        {
+          "name": "Notificacao de recusa (SMS)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('200, 1 notificacao, canal sms', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(data.count).to.eql(1);",
+                  "  pm.expect(data.results[0].canal).to.eql('sms');",
+                  "});",
+                  "console.log('titulo:', data.results[0].titulo, '| mensagem:', data.results[0].mensagem);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_user}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/notificacoes/?canal=sms",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notificacoes", ""],
+              "query": [
+                { "key": "canal", "value": "sms", "description": "Filtro por canal." }
+              ]
+            },
+            "description": "GET /notificacoes/?canal=sms. Esperado: a notificacao de recusa, com o texto do motivo. O texto NAO e contrato: ele e apresentado por `api/core/notificacoes.py` e muda sem breaking change."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Idempotencia do re-POST",
+      "description": "`Pagamento.pedido` e OneToOne: um pedido aceita UM pagamento. O re-POST do mesmo POST cai no IntegrityError do banco, e quem decide o que responder e a `idempotency_key` (SHA-256 de pedido + metodo + desfecho) - nao o IntegrityError, que so diz que ja existe algum pagamento.",
+      "item": [
+        {
+          "name": "Re-POST identico (mesma tentativa)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('200 e republicado: false', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(data.republicado).to.be.false;",
+                  "  pm.expect(data.evento.duplicado).to.be.true;",
+                  "});",
+                  "pm.test('mesmo pagamento, sem criar outro', () => {",
+                  "  pm.expect(String(data.id)).to.eql(String(pm.collectionVariables.get('pagamento_id')));",
+                  "  pm.expect(data.transacao_id).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metodo\": \"pix\",\n  \"aprovado\": true,\n  \"canal\": \"email\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_id}}", "pagamento", ""]
+            },
+            "description": "Mesmo metodo e mesmo desfecho do pagamento ja resolvido. Esperado: **200**, `republicado: false`, `evento.duplicado: true`, e o MESMO pagamento.\n\nEsta e a resposta honesta quando o gateway ja respondeu: publicar de novo criaria uma segunda notificacao para um fato ja notificado.\n\nO mesmo 200 com `republicado: true` e a cura do 503: se a publicacao original falhou (broker fora), o pagamento fica em `registrado` e este re-POST republica o evento."
+          },
+          "response": []
+        },
+        {
+          "name": "Re-POST com metodo diferente (outra tentativa)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('409 e nao um 200 silencioso', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(data).to.have.property('pagamento_existente');",
+                  "});",
+                  "pm.test('as duas chaves sao diferentes', () => {",
+                  "  pm.expect(data.idempotency_key_enviado).to.not.eql(data.idempotency_key_existente);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metodo\": \"boleto\",\n  \"aprovado\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_id}}", "pagamento", ""]
+            },
+            "description": "Outro metodo no mesmo pedido. Esperado: **409**, com `pagamento_existente` (o pagamento em PIX) e as duas chaves lado a lado.\n\nSe isso devolvesse 200 com o pagamento em PIX, o cliente receberia um \"deu certo\" para um pedido que ele nao tentou fazer. Um 409 e a resposta honesta: a linha existe e nao e a que voce pediu."
+          },
+          "response": []
+        },
+        {
+          "name": "Recusa sem motivo (400 na entrada)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('400 explicando o que falta', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  pm.expect(data).to.have.property('motivo_recusa');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_user}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metodo\": \"boleto\",\n  \"aprovado\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_recusado_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_recusado_id}}", "pagamento", ""]
+            },
+            "description": "`aprovado: false` sem `motivo_recusa`. Esperado: **400** com o erro em `motivo_recusa`.\n\nA mesma regra do contrato `PagamentoRegistrado` roda aqui, na entrada: e melhor um 400 explicando o que falta do que um evento que o worker rejeitaria como DLQ por algo que o cliente podia ter lido antes."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Falha injetada e DLQ",
+      "description": "A prova de que o segundo fluxo tem escada de reentrega e DLQ **próprias**. Nao ha bug de negocio aqui: o POST marca o pagamento com `simular_falha`, e o worker levanta `FalhaInjetada` ao ler essa marcação do banco.\n\nAcompanhe em outro terminal: `docker compose logs -f worker-pagamentos`.\n\nPrecisa de `PAGAMENTO_PERMITIR_SIMULACAO_FALHA=true`, e a API e quem consulta a flag para aceitar o header `X-Simular-Falha`. O worker nao le flag nenhuma: ele honra a marcação gravada. Com a flag desligada o header e ignorado em silencio e a DLQ fica vazia.",
+      "item": [
+        {
+          "name": "Simular pagamento que vai falhar (X-Simular-Falha)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.id) {",
+                  "  pm.collectionVariables.set('pagamento_falho_id', data.id);",
+                  "}",
+                  "pm.test('201 - o pedido da falha ainda nao tinha pagamento', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(data.status).to.eql('registrado');",
+                  "});",
+                  "pm.test('o worker ainda nao aplicou efeito nenhum', () => {",
+                  "  pm.expect(data.notificado_em === null).to.be.true;",
+                  "  pm.expect(data.tentativas).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token_admin}}" },
+              { "key": "X-Simular-Falha", "value": "1" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metodo\": \"pix\",\n  \"aprovado\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_falha_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_falha_id}}", "pagamento", ""]
+            },
+            "description": "POST com o header `X-Simular-Falha: 1`. A flag grava `simular_falha=true` no pagamento (nao viaja no evento: o worker le do banco).\n\nUsa `{{pedido_falha_id}}`, criado antes para isso: um pedido so aceita um pagamento, e o caminho feliz ja pagou o `{{pedido_id}}`. O token e o do `admin` porque o pedido e dele. Por isso o `201` aqui e estrito - se vier 409, o pedido ja tem pagamento e o cenario naprovou nada."
+          },
+          "response": []
+        },
+        {
+          "name": "Acompanhar as tentativas ate a DLQ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.test('o pagamento travou em registrado', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(data.status).to.eql('registrado');",
+                  "});",
+                  "pm.test('nenhum aviso saiu', () => {",
+                  "  pm.expect(data.notificado_em === null).to.be.true;",
+                  "});",
+                  "pm.test('as tentativas subiram', () => {",
+                  "  pm.expect(data.tentativas).to.be.above(0);",
+                  "  pm.expect(String(data.motivo_falha)).to.not.eql('');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_admin}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_falha_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_falha_id}}", "pagamento", ""]
+            },
+            "description": "Repita este GET a cada ~10 s por ~65 s. O que esperar:\n\n* `tentativas` subindo de 0 para **4** (a tentativa inicial conta);\n* `status` **sempre** `registrado` - nao existe um `status: falha` no `Pagamento`: o pedido continua `processado`, e quem continua pendente e o aviso, que nao foi criado;\n* `notificado_em` sempre vazio.\n\nNos logs: `PagamentoFalha` com `motivo: reentrega 1/3 em 5s`, depois `2/3 em 15s`, depois `3/3 em 45s`, e por fim `PagamentoDlq`.\n\nPara ver e reprocessar:\n\n```\ndocker compose exec api python api/manage.py inspecionar_dlq_kafka --fluxo pagamentos\ndocker compose exec api python api/manage.py inspecionar_dlq_kafka --fluxo pagamentos --reprocessar\n```\n\nO `--reprocessar` descarta o `x-tentativa` que veio da DLQ: sem isso a mensagem volta com a escada ja esgotada, e o worker a manda direto de volta para a DLQ."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Permissoes",
+      "description": "A notificacao herda a permissao do dono do pedido: `user` ve o que e dele, `admin` ve tudo.",
+      "item": [
+        {
+          "name": "Listar notificacoes sem token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('401', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/notificacoes/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notificacoes", ""]
+            },
+            "description": "GET /notificacoes/ sem token. Esperado: 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Notificacoes do user (so as proprias)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_user}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/notificacoes/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notificacoes", ""]
+            },
+            "description": "GET /notificacoes/ com `demo_user`. Esperado: 200, e **apenas** as notificacoes dos pedidos dele. Se aparecer a de outro dono, o filtro por usuario esta furado."
+          },
+          "response": []
+        },
+        {
+          "name": "Notificacoes do admin (todas)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token_admin}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/notificacoes/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notificacoes", ""]
+            },
+            "description": "GET /notificacoes/ com `demo_admin`. Esperado: 200, e a lista completa - a contagem e maior ou igual a do user."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
