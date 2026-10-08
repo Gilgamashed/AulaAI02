@@ -1573,7 +1573,241 @@ A spec é explícita sobre não antecipar as aulas seguintes, e nada abaixo entr
 * Coleção Postman (21 requests, na ordem do DoD): [`collections/synapseshop_aula11.postman_collection.json`](collections/synapseshop_aula11.postman_collection.json)
 
 
+## Testes automatizados e cobertura (Aula 12)
+
+A suíte roda em `pytest`, num container descartável, cobrindo as **duas**
+aplicações do repositório ao mesmo tempo — a API Django (`api/core`) e o
+microsserviço FastAPI (`services/inventory/app`) — num único runner, com um
+único `pyproject.toml` na raiz.
+
+### Como executar
+
+```bash
+# A forma da equipe: profile `tests` do compose (imagem Dockerfile.tests).
+docker compose --profile tests run --rm tests
+```
+
+O serviço `tests` espera o `db` ficar saudável (o pytest-django cria e
+destrói um banco `test_*` por execução), monta o diretório de trabalho por
+cima da imagem — editar um teste **não** exige rebuild; só mudou um
+`requirements*.txt`? Aí é preciso `docker compose build tests`.
+
+Equivalente local, com o banco publicado (`docker compose up -d db`):
+
+```bash
+pytest --cov          # relatório + gate de cobertura no stdout
+```
+
+O relatório HTML sai em `htmlcov/index.html` depois de qualquer execução com
+`--cov`.
+
+### Estrutura
+
+```
+tests/
+├── conftest.py                 # fixtures globais + mocks (isolamento)
+├── unit/
+│   ├── test_cache_utils.py         # utils críticos do cache-aside
+│   ├── test_contracts_pedido.py    # contrato do evento PedidoCriado
+│   ├── test_contracts_pagamento.py # contrato do PagamentoRegistrado
+│   ├── test_erros.py               # relatório de erro dos consumidores
+│   ├── test_notificacoes.py        # título/mensagem por método e canal
+│   ├── test_inventory_service.py   # regras de negócio do estoque
+│   └── test_inventory_repository.py# repositório real (SQLite em memória)
+└── integration/
+    ├── test_catalog_lifecycle.py   # POST/GET + efeito na base (pedra do DoD 4)
+    ├── test_pedidos_pagamento_fluxo.py # idempotência e eventos via HTTP
+    ├── test_auth_throttling.py     # 429 do login com cota baixa
+    └── test_inventory_endpoints.py # rotas FastAPI com repositório falso
+```
+
+### Convenções da equipe
+
+* **Markers.** Todo teste nasce marcado: `@pytest.mark.unit` ou
+  `@pytest.mark.integration`. Markers desconhecidos são erro
+  (`--strict-markers`), então um marker novo precisa entrar em
+  `pyproject.toml`.
+* **Isolamento é estrutural, não de disciplina.** O `tests/conftest.py` é o
+  ponto único de isolamento e o `api/config/settings_test.py` torna-o
+  garantia: nenhum teste toca Redis, Kafka ou RabbitMQ. As fixtures
+  `autouse` zeram cache e métricas entre testes e substituem o broker por um
+  duplo em memória — um 429 ou um contador não podem vazar de um teste para
+  o outro.
+* **Relógio fixo.** Testes que comparam payload/timestamp usam a fixture
+  `relogio_fixo` (freezegun, `tick=False`); nada de asserção dependente da
+  hora em que rodou.
+* **Inventory sem banco.** Os testes HTTP do estoque trocam
+  `get_inventory_service` pelo serviço sobre o repositório falso do conftest;
+  a tabela `inventory_items` (governada pelo Alembic) **não** é tocada pela
+  suíte. O repositório real é coberto em
+  `tests/unit/test_inventory_repository.py` contra um SQLite em memória.
+* **Throttling.** As cotas sobem para 1000/min no settings_test para a suíte
+  não estourar por acidente; o 429 é provado de propósito em
+  `tests/integration/test_auth_throttling.py`, que devolve a taxa do `login`
+  para 1/min.
+* **Determinismo no tempo:** nada de `sleep` nem de asserção dependente da
+  passagem de tempo real — onde o tempo importa, congela-se o relógio.
+* **Suíte determinística:** sem I/O externo aberto e sem paralelismo; um
+  teste injeta a própria semente/estado quando precisar.
+
+### Metas de cobertura
+
+* **85% global** nas duas aplicações, com *enforcement*: o gate
+  `--cov-fail-under=85` no `pyproject.toml` reprova a execução abaixo disso.
+* **100% nos utilitários críticos**: `cache_metrics` e o relatório de erros
+  são cobertos por `tests/unit`; os contratos `PedidoCriado`/
+  `PagamentoRegistrado` também têm unit tests dedicados (`test_contracts_*`),
+  embora estejam fora da métrica por morarem na infra de mensageria.
+* O restante pode equilibrar: a meta é global, não por arquivo; um regresso
+  grande num só serviço derruba o gate, um pequeno ajuste de scaffold não é
+  motivo para "esconder" arquivo.
+* **Escopo medido**: o `--cov` cobre as duas aplicações. Ficam de fora as
+  superfícies que a suíte não exercita por construção — `migrations`, `__init__`,
+  `tests`, `management/commands`, `admin`/`apps` (bootstrap do Django) e
+  `api/core/messaging/*` (infra de broker que só roda em worker/CLI:
+  `consumir_pedidos`, `republicar_pedidos`, `declarar_topicos_kafka`). A
+  justificativa de cada exclusão está no `omit` do
+  `[tool.coverage.run]` no `pyproject.toml`.
+
+### Pendências técnicas registadas
+
+O DoD 7 pede as pendências e melhorias da aula como *issues* no
+[repositório](https://github.com/Gilgamashed/AulaAI02/issues) — todas foram
+criadas via API do GitHub. As corrigidas nesta aula ficaram **fechadas**, com
+um comentário a apontar a correção e o teste que a cobre; a única aberta
+continua em backlog:
+
+**Corrigidas nesta aula (fechadas):**
+
+* [#1](https://github.com/Gilgamashed/AulaAI02/issues/1) — indentação de
+  `get_itens_recentes` no `ItemDetalheSerializer` (`api/core/serializers.py`),
+  causa do 500 no `GET /items/{id}/detalhes/`;
+* [#2](https://github.com/Gilgamashed/AulaAI02/issues/2) — a fixture `item` do
+  `conftest.py` passava um campo `stock` inexistente no model;
+* [#3](https://github.com/Gilgamashed/AulaAI02/issues/3) — `httpx` como
+  dependência explícita da suíte (TestClient do FastAPI) no
+  `requirements-dev.txt`;
+* [#4](https://github.com/Gilgamashed/AulaAI02/issues/4) — publicação com
+  `transaction.on_commit` adiada no `TestCase` devolveria 503 prematuro; os
+  testes de fluxo usam `@pytest.mark.django_db(transaction=True)`;
+* [#5](https://github.com/Gilgamashed/AulaAI02/issues/5) — os testes de
+  throttling do login precisavam de `db` (o `simplejwt` consulta a tabela de
+  usuários mesmo com credencial inválida);
+* [#6](https://github.com/Gilgamashed/AulaAI02/issues/6) — o override da cota
+  do login não surtia efeito via `override_settings`; o fixture
+  `throttling_baixo` patcha o atributo de classe `ThrottleMemoriaScope`;
+* [#7](https://github.com/Gilgamashed/AulaAI02/issues/7) — a PK `BIGINT` não
+  autoincrementa no SQLite; `_item()` passa `id` explícito.
+
+**Aberta:**
+
+* [#8](https://github.com/Gilgamashed/AulaAI02/issues/8) — no host, o
+  `pytest --cov` local precisa do `DATABASE_URL` com as credenciais do `.env`
+  do compose para o pytest-django criar o banco `test_*` — a via oficial da
+  equipe é o container (`docker compose --profile tests ...`).
+
+
+## Checklist do Integrador Externo (Aula 13)
+
+O que um terceiro precisa para consumir a API do SynapseShop. A fonte de
+verdade do contrato é o ficheiro `docs/openapi.yaml` (OpenAPI 3.1), validado
+por `scripts/lint-openapi.ps1` (Spectral, 0 erros/avisos).
+
+### URLs de ambiente (dev)
+
+| Ambiente | URL                                      | Documentação interativa        |
+| -------- | ---------------------------------------- | ------------------------------ |
+| API (DRF) | `http://localhost:8000`                 | `/docs/` (Swagger UI), `/redoc/` (ReDoc), `/docs/openapi.yaml` |
+| Inventory (FastAPI) | `http://localhost:8001`        | `/docs` (nativo do FastAPI)    |
+
+Verificação rápida: `GET /health` na API e no inventory devolvem
+`{"status": "ok", ...}`.
+
+### Autenticação (JWT)
+
+- **Fluxo:** `POST /api/v1/auth/token/` com `{username, password}` →
+  `{access, refresh}`. Use `Authorization: Bearer <access>` nas rotas
+  protegidas. Renove com `POST /api/v1/auth/token/refresh/` e valide com
+  `POST /api/v1/auth/token/verify/`.
+- **Validade:** `access` expira em **5 min**, `refresh` em **1 dia**.
+- **Credenciais demo (dev):** `demo_user` / `demo-user@Synapse2026` (papel
+  `user`) e `demo_admin` / `demo-admin@Synapse2026` (papel `admin`), criadas por
+  `manage.py seed_auth`; senhas configuráveis via `.env`
+  (`SEED_ADMIN_PASSWORD`, `SEED_USER_PASSWORD`). Pessoais do Admin Django
+  também via `.env`.
+- **Matriz de permissões:** leitura de `/categories/` e `/items/` é pública;
+  escrita exige `user`; rotas administrativas (categories/items PUT/PATCH/
+  DELETE, `GET /cache/metrics/`) exigem `admin`. Anónimo a escrever = **401**;
+  `user` em rota admin = **403**.
+- **Notificações/pedidos:** usuários comuns acedem apenas aos próprios
+  recursos (as listagens e detalhes já filtram por dono).
+
+### Cabeçalhos obrigatórios
+
+| Cabeçalho | Onde | Nota |
+| --------- | ---- | ---- |
+| `Authorization: Bearer <jwt>` | rotas protegidas | exigido na prática |
+| `X-Trace-Id` (UUID) | rotas de negócio autenticadas | **contrato-alvo** documentado em `openapi.yaml`; a implementação atual ainda não o valida nem propaga |
+| `Idempotency-Key` | `POST /pedidos/` | **contrato-alvo**; a implementação atual deriva a chave no servidor (re-POST do mesmo payload responde **200** com o mesmo `id`) |
+
+### Limites de utilização (rate limits)
+
+| Taxa | Aplica-se a | Convén |
+| ---- | ----------- | ------ |
+| `anon` — 20/min | requisições não autenticadas | 429 quando excedida |
+| `user` — 100/min | usuários autenticados | 429 quando excedida |
+| `login` — 5/min | `/auth/token/` e `/auth/token/refresh/` | 429 quando excedida |
+
+As taxas são parametrizáveis por ambiente (`DRF_ANON_RATE`, `DRF_USER_RATE`).
+
+### Paginação, filtros e ordenação
+
+- **Paginação:** global `PageNumberPagination`, `PAGE_SIZE=20`, resposta
+  `{count, next, previous, results}`; página inexistente = 404. O DRF usa
+  `?page=`.
+- **Contrato-alvo** (`openapi.yaml`): `?limit=` e `nextCursor` (cursor
+  relativo ao DOD de aplicação), ainda não implementados.
+- **Filtros:** `?category=`, `?is_active=`, `?min_price=`, `?max_price=` (itens);
+  `?pedido=`, `?canal=email|sms`, `?status=`, `?search=` (notificações/pedidos).
+- **Ordenação:** `?ordering=-price` (DRF); o contrato-alvo documenta
+  `?sort=<campo>:<dir>` (ex.: `sort=enviadaEm:desc`).
+
+### Erros padronizados
+
+O contrato define o `ErrorSchema` seguindo a RFC 7807
+(`application/problem+json`): `{type, title, status, detail, instance, code,
+errors}`. `code` é um identificador estável para máquinas e `errors` mapeia a
+validação por campo. Bastante: `400 Bad Request`, `401 Unauthorized`,
+`403 Forbidden`, `404 Not Found`, `409 Conflict` (idempotência/OneToOne),
+`503 Service Unavailable` (broker indisponível, pedido recuperável).
+
+> A implementação atual devolve, em vários casos, o formato do DRF
+> (`{"detail": ...}`). O `ErrorSchema` é o contrato-alvo; a migração é
+> acompanhada no `docs/CHANGELOG.md`.
+
+### Política de alterações de versão
+
+- O contrato vive em `docs/openapi.yaml` e segue **SemVer**; cada aula é uma
+  versão menor (`1.13.0` hoje).
+- **Mudanças que quebram** (remoção/alteração de rota, campo ou cabeçalho)
+  só entram numa versão maior ou menor com **aviso** no `docs/CHANGELOG.md` e
+  deprecação quando razoável — não em patch.
+- O prefixo `api/v1/` é **estável**: não muda sem nova versão de rota.
+- Aula 13 não introduz dependências: o stack continua a subir com
+  `docker compose up -d` como antes.
+
+### Artefactos de consumo
+
+- **Coleção Postman:** `collections/synapseshop_aula13.postman_collection.json`
+  (41 requisições com exemplos de sucesso e erro, na ordem do fluxo pedido →
+  pagamento → notificação).
+- **Environment Postman:** `collections/synapseshop_aula13.postman_environment.json`
+  (`base_url`, `inventory_url`, `token`, `trace_id`, `idempotency_key`).
+- **Deploy/consumo em produção:** os URLs acima são de desenvolvimento. Para
+  outros ambientes, troque as variáveis do environment (base URL, credenciais).
+
 ## Referências
 
 - [Histórico de uso de IA generativa](PROMPTS.md)
+- [Histórico de alterações](docs/CHANGELOG.md)
 - [Diretriz SpecDD](specs/)
