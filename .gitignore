@@ -35,6 +35,10 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# Tooling de linting OpenAPI (Spectral via npm, gerido por scripts/lint-openapi.ps1)
+.spectral-tools/
+node_modules/
+
 # Docker / Compose local
 *.log
 
