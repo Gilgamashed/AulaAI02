@@ -174,7 +174,7 @@ class ItemDetalheSerializer(serializers.ModelSerializer):
             obj.category.items.order_by("-price", "id")[:3], many=True
         ).data
 
-def get_itens_recentes(self, obj: Item) -> list:
+    def get_itens_recentes(self, obj: Item) -> list:
         """Os 3 itens mais recentes da mesma categoria do produto."""
         return ItemResumoSerializer(
             obj.category.items.order_by("-created_at", "id")[:3], many=True

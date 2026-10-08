@@ -1,0 +1,115 @@
+# ====================================================================
+# Configuração do pytest e da cobertura de código (Aula 12).
+#
+# Fica na raiz — e não em `api/` ou `services/inventory/` — porque a suíte
+# cobre as DUAS aplicações do repositório num container só. Um `pytest.ini`
+# dentro de `api/` não seria lido quando o runner é chamado da raiz, e dois
+# arquivos de configuração por aplicação fariam o mesmo teste rodar com
+# regras diferentes dependendo de onde foi chamado.
+# ====================================================================
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+
+# --- Descoberta da aplicação ----------------------------------------
+# `config.settings_test` e não `config.settings`: o módulo de teste garante
+# caches em memória, throttle com folga e hash de senha barato. Usar os
+# settings de produção aqui faria a suíte escrever no Redis real.
+DJANGO_SETTINGS_MODULE = "config.settings_test"
+
+# `api` torna `config.*` e `core.*` importáveis (é o que os settings e o
+# código esperam). `services/inventory` torna `app.*` importável, o
+# namespace do microsserviço de estoque — que usa o nome genérico `app` e
+# por isso precisa do caminho na frente dos testes de importarem o pacote.
+pythonpath = ["api", "services/inventory"]
+
+testpaths = ["tests"]
+
+# --- addopts ---------------------------------------------------------
+# `--cov-branch` mede cobertura de ramo, não só de linha: é o que revela um
+# `if` que ninguém exercita no caminho falso.
+#
+# `python_files = test_*.py` é o padrão do pytest, declarado aqui só para
+# deixar explícito que a suíte não usa `tests.py` nem `*_spec.py`.
+#
+# `--strict-markers` faz um marker desconhecido virar erro em vez de aviso:
+# é o que impede um `@pytest.mark.slow` digitado errado de passar silencioso
+# e não executar nada.
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=api/core",
+    "--cov=services/inventory/app",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    # Gate da Aula 12 (DoD 5): abaixo de 85% global a suíte falha. A subida é
+    # tolerante (a meta é de módulo/geral, não de cada arquivo), mas a base é a
+    # média ponderada das DUAS aplicações — um regresso grande num só serviço
+    # derruba o gate.
+    "--cov-fail-under=85",
+]
+
+markers = [
+    "unit: teste de unidade, sem banco e sem I/O externo",
+    "integration: exercita HTTP, banco ou serviço completo",
+    "inventory: teste do microsserviço FastAPI de estoque",
+]
+
+# ====================================================================
+# Cobertura
+# ====================================================================
+[tool.coverage.run]
+branch = true
+
+# `source` é definido em `--cov` (nos addopts) para que o relatório liste
+# apenas o código que existe e foi exercitado. Aqui ficam só os recortes.
+omit = [
+    # Migrações são geradas pelo Django e rodam sob o controle dele: testá-las
+    # mede o Django, não este código.
+    "*/migrations/*",
+    # __init__ de pacote não costuma ter comportamento próprio.
+    "*/__init__.py",
+    # A própria suíte não conta como código coberto.
+    "*/tests/*",
+    # Management commands do Django são executados via `manage.py`, não via
+    # HTTP ou import de app — o pytest nunca os exercita. Cobri-los exigiria
+    # armar um runner de CLI por teste, que é cobertura do Django, não deste
+    # código.
+    "*/management/commands/*",
+    # `admin.py` é bootstrap do Django Admin (registrar models). Testá-lo
+    # mediria o framework; o comportamento de negócio que ele expõe já é o
+    # cobrado pelas views e models.
+    "*/admin.py",
+    # `apps.py` só declara o AppConfig do Django (nome e auto_field).
+    "*/apps.py",
+    # Infra de mensageria (`api/core/messaging/*`): só roda em worker/CLI
+    # (`consumir_pedidos`, `republicar_pedidos`, `declarar_topicos_kafka`) —
+    # o pytest nunca os exercita, e a suíte deliberadamente não toca broker
+    # real (ver `tests/conftest.py`, `broker_capturado`). Medir aqui exigiria
+    # reescrever o comportamento dos workers; o que as views consomem
+    # (`broker`, `contracts`) já é exercitado via HTTP e unit tests.
+    "*/messaging/*",
+]
+
+[tool.coverage.report]
+# `skip_covered` esconde os módulos 100% da lista, que só poluem a leitura.
+# `show_missing` é o que transforma "85%" em ação: aponta a linha exata a
+# escrever teste.
+show_missing = true
+skip_covered = true
+
+exclude_lines = [
+    # `pragma: no cover` no código-fonte é o sinal explícito de "este ramo é
+    # inalcançável num teste" (o próprio projeto já o usa em `views.py` para as
+    # corridas de banco). Esta regra respeita essa marcação.
+    "pragma: no cover",
+    # Linha de debug/import defensivo: não é comportamento testável.
+    "raise NotImplementedError",
+    # Protocols, stubs e assinaturas abstratas.
+    "@abstractmethod",
+    # `if __name__ == "__main__":` — o bloco só roda executando o arquivo
+    # direto, o que pytest nunca faz.
+    'if __name__ == .__main__.:',
+]

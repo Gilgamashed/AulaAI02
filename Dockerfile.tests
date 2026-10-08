@@ -1,0 +1,75 @@
+# ============================================================
+# SynapseShop — Dockerfile de TESTES (Aula 12)
+#
+# Por que um Dockerfile separado, e não o Dockerfile da API?
+#
+# O `Dockerfile` de produção instala só `requirements.txt` e termina com
+# gunicorn servindo a porta 8000. Uma suíte de testes precisa de outras
+# dependências (pytest, pytest-django, pytest-cov, freezegun) E das
+# dependências do microsserviço de estoque (fastapi, sqlalchemy, alembic),
+# porque a spec da Aula 12 manda cobrir as duas aplicações.
+#
+# Juntar tudo num Dockerfile só significaria inflar a imagem de produção com
+# pytest — que nunca é usado em runtime, ocupa espaço e aumenta a superfície
+# de dependências. Aqui a imagem de teste é descartável e isolada.
+#
+# Requisitos atendidos (espelhando o Dockerfile principal):
+#   1. Imagem oficial do Python
+#   2. Usuário não-root
+#   3. Multistage build + cache mount do BuildKit
+#   4. Nenhum CMD de servidor: quem decide o comando é o compose
+# ============================================================
+
+# ====================================================================
+# ESTÁGIO 1 — BUILDER
+# Prepara Python, pip e TODAS as dependências (as duas aplicações + a
+# suíte). Este estágio é descartado no final.
+# ====================================================================
+FROM python:3.12-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /build
+
+# --- CACHE DE CAMADA -------------------------------------------------
+# Só os requirements são copiados antes do código: mexer num teste não
+# invalida a camada de instalação (que é a cara e lenta).
+#
+# `requirements-dev.txt` já referencia os dois `requirements.txt` da raiz e
+# do microsserviço via `-r`, então o contexto precisa incluir
+# `services/inventory/requirements.txt` — daí o `COPY` do diretório inteiro
+# em vez de um arquivo solto.
+COPY requirements.txt requirements-dev.txt ./
+COPY services/inventory/requirements.txt ./services/inventory/requirements.txt
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip \
+    && mkdir -p /install \
+    && pip install --prefix=/install -r requirements-dev.txt
+
+# ====================================================================
+# ESTÁGIO 2 — RUNTIME
+# ====================================================================
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN useradd --create-home --shell /bin/bash appuser
+
+COPY --from=builder /install /usr/local
+
+# O código vem por último para preservar o cache das camadas anteriores.
+COPY --chown=appuser:appuser . .
+
+USER appuser
+
+# Nenhum EXPOSE: o container de teste não serve tráfego — ele roda a suíte e
+# sai. O compose passa o comando em `command:`.
+#
+# O CMD aqui é um fallback caso alguém rode a imagem sem o compose:
+# executa a suíte inteira com relatório de cobertura no stdout.
+CMD ["pytest"]

@@ -1,0 +1,33 @@
+# ====================================================================
+# Dependências de desenvolvimento e teste (Aula 12).
+#
+# Este arquivo NÃO entra na imagem de produção: o `Dockerfile` da API e o
+# `services/inventory/Dockerfile` instalam só o `requirements.txt` de cada um.
+# Separar as duas listas é deliberado — o container da API não deve carregar
+# pytest, e a suíte de testes precisa das dependências das DUAS aplicações
+# para cobri-las num container só.
+# ====================================================================
+
+# Herda as dependências de runtime das DUAS aplicações.
+# O segundo `-r` é o que permite testar o microsserviço de estoque dentro do
+# mesmo container de teste: sem ele, os testes do inventory não teriam
+# fastapi nem sqlalchemy disponíveis.
+-r requirements.txt
+-r services/inventory/requirements.txt
+
+# --- Suíte de testes --------------------------------------------------
+# pytest         : runner, fixtures e `parametrize`.
+# pytest-django  : roda o Django sob pytest (cria o banco de teste efêmero,
+#                  expõe a fixture `db` e lê o DJANGO_SETTINGS_MODULE).
+# pytest-cov     : recolhe a cobertura de código.
+# freezegun      : congela o relógio — a spec pede um "relógio fixo" para que
+#                  timestamp de contrato e janela de dedupe não variem entre
+#                  execuções.
+pytest>=8.3,<9.0
+pytest-django>=4.9,<5.0
+pytest-cov>=6.0,<7.0
+freezegun>=1.5,<2.0
+# httpx: transporte HTTP do `starlette.testclient.TestClient` (FastAPI). Sem
+# ele, os testes de integração do inventory não têm com o que rodar — o
+# TestClient usa o componente `httpx` em vez do `requests`.
+httpx>=0.28,<1.0

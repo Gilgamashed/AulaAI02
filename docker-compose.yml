@@ -402,6 +402,49 @@ services:
       DRF_ANON_RATE: ${DRF_ANON_RATE:-20/min}
       DRF_USER_RATE: ${DRF_USER_RATE:-100/min}
 
+# ====================================================================
+  # Aula 12 — suíte de testes (Django + FastAPI num container descartável)
+  # ====================================================================
+  # `docker compose --profile tests run --rm tests` roda a suíte inteira
+  # (tests/unit + tests/integration + conftest.py) com cobertura das DUAS
+  # aplicações e o gate de 85% (`--cov-fail-under=85`). O serviço vive no
+  # profile `tests` — sem o flag, `docker compose up` não o cria (é um
+  # runner, não um servidor).
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+    # Efêmero e sem `container_name`: o pytest executa e sai (o Compose não
+    # precisa de nome fixo porque este serviço nunca é escalado).
+    restart: "no"
+    profiles: ["tests"]
+    # Os testes de integração do Django precisam do PostgreSQL para o banco de
+    # teste efêmero que o pytest-django cria/destroi (`test_*`). Os testes do
+    # inventory usam o repositório falso (settings_test), então não tocam neste
+    # banco — mas `db` saudável é o que garante o `DATABASE_URL` resolvível.
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # As mesmas variáveis do serviço `api`: o import de `config.settings`
+      # (herdado pelo settings_test) lê URLs e chaves do ambiente.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-synapse}:${POSTGRES_PASSWORD:-synapse}@db:5432/${POSTGRES_DB:-synapse}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-synapseshop-key}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
+      REDIS_URL_DEDUPE: ${REDIS_URL_DEDUPE:-redis://redis:6379/0}
+      MENSAGERIA_BROKER: ${MENSAGERIA_BROKER:-kafka}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-synapse}:${RABBITMQ_PASSWORD:-synapse}@rabbitmq:5672/%2F
+    # O comando da imagem já é `pytest` (fallback do Dockerfile.tests); aqui o
+    # compose apenas o mantém explícito.
+    command: ["pytest"]
+    # Monta o diretório de trabalho por cima da cópia da imagem: editar um
+    # teste não exige rebuild — a imagem carrega as dependências, e o código
+    # vem do host.
+    volumes:
+      - .:/app
+
 volumes:
   pgdata:
   rabbitmqdata:
