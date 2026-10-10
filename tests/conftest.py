@@ -76,6 +76,7 @@ def _estado_limpo():
     da disciplina de quem escreve o teste.
     """
     from core.cache_metrics import cache_metrics
+    from core.llm.metricas import llm_metrics
     from core.messaging.metricas import mensageria_metrics
 
     def _zerar():
@@ -86,6 +87,7 @@ def _estado_limpo():
             caches[alias].clear()
         cache_metrics.reset()
         mensageria_metrics.reset()
+        llm_metrics.reset()
 
     _zerar()
     yield
