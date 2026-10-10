@@ -1706,6 +1706,25 @@ continua em backlog:
   do compose para o pytest-django criar o banco `test_*` — a via oficial da
   equipe é o container (`docker compose --profile tests ...`).
 
+**Aula 14 (melhorias — abertas):**
+
+* [#9](https://github.com/Gilgamashed/AulaAI02/issues/9) — adaptador HTTP do
+  provedor de IA real (`LLM_BASE_URL`/`LLM_API_KEY`) cumprindo o contrato
+  `ProvedorLlm`, com timeout no transporte e mapeamento 4xx/5xx;
+* [#10](https://github.com/Gilgamashed/AulaAI02/issues/10) — agregação das
+  métricas de `GET /api/v1/llm/metrics/` entre processos (Gunicorn/containers)
+  e cortes por usuário/papel (hoje os contadores são do processo que atende);
+* [#11](https://github.com/Gilgamashed/AulaAI02/issues/11) — guardrails
+  adicionais no `POST /api/v1/assist`: sanização da saída, mitigação de
+  prompt injection via logs e reforço de escopo dos modos `summarize`/`explain`;
+* [#13](https://github.com/Gilgamashed/AulaAI02/issues/13) — expansão e revisão
+  periódica dos padrões de redação de `api/core/llm/redacao.py` (CPF/CNPJ por
+  dígito verificador, placa Mercosul, RG/CNH, chave PIX/IBAN) com regressão
+  por padrão;
+* [#14](https://github.com/Gilgamashed/AulaAI02/issues/14) — cache de respostas
+  do assist (por `mode` + logs redigidos + parâmetros) com TTL e medição de
+  hit rate/custo evitado.
+
 
 ## Checklist do Integrador Externo (Aula 13)
 
@@ -1805,6 +1824,140 @@ validação por campo. Bastante: `400 Bad Request`, `401 Unauthorized`,
   (`base_url`, `inventory_url`, `token`, `trace_id`, `idempotency_key`).
 - **Deploy/consumo em produção:** os URLs acima são de desenvolvimento. Para
   outros ambientes, troque as variáveis do environment (base URL, credenciais).
+
+## Assistente de IA e llm_service (Aula 14)
+
+A API ganhou um assistente que **sumariza/explica logs operacionais**
+(`POST /api/v1/assist`) e uma camada de IA isolada em `api/core/llm/` com
+**resiliência**, **privacidade** e **telemetria** próprias. O provedor atual é
+um **mock** determinístico em memória — sem rede e sem credenciais. O contrato
+`ProvedorLlm` é o ponto único de acoplamento: o adaptador do provedor real
+entrará numa iteração futura **sem tocar** na camada de resiliência.
+
+### Arquitetura do llm_service
+
+```
+POST /api/v1/assist
+      │  AssistView (core/views.py)      valida o payload e traduz desfechos em HTTP
+      ▼
+   LlmService.completar (core/llm/servico.py)
+      │  redação de PII ──► breaker ──► retry ──► timeout (guarda com executor)
+      ▼
+   ProvedorMock (hoje)  ·  adaptador HTTP (futuro: cumprir `ProvedorLlm`)
+```
+
+Uma chamada passa pelas garantias nesta ordem:
+
+1. **Redação (item 3 do DoD).** Antes de tocar o provedor, `redacao.py` troca
+   PII/segredos por placeholders; a resposta também sai redigida (defesa contra
+   o provedor ecoar o conteúdo). A bandeira `LLM_REDACAO_ATIVA` desliga a
+   camada em desenvolvimento/benchmark (nunca em produção).
+2. **Circuit breaker.** Decide antes de gastar tokens. `closed → open →
+   half-open` (5 falhas · cooldown 30s · 2 sondas; configurável via `LLM_CB_*`).
+   Circuito aberto vira **503** e a chamada nem chega ao provedor.
+3. **Retry com backoff exp. + jitter.** Só falhas recuperáveis
+   (`LLM_BACKOFF_*`; padrão: 3 tentativas, base 1s, fator 2). Um 429 que traz
+   `retry_after` respeita o tempo sugerido pelo provedor.
+4. **Timeout.** Guarda genérica num executor (`future.result(timeout=...)`). O
+   estouro vira `LlmTimeout` — recuperável — e nunca deixa o chamador pendurado.
+5. **Telemetria (item 3).** Cada desfecho alimenta `metricas.py`
+   (latência, taxa de erro, tokens, custo estimado) e o log JSON `core.llm`;
+   o agregado exposto em `GET /api/v1/llm/metrics/` (admin).
+
+Além disso, o endpoint exige **JWT** e cai no throttling `user` global
+(100/min em produção) — que funciona como **cota de custo** por usuário.
+
+### Endpoint `POST /api/v1/assist`
+
+| Item | Descrição |
+| --- | --- |
+| Corpo | `{"mode": "summarize"\|"explain", "logs": string\|array, "temperature"?: 0.0–1.0 (0.2), "max_tokens"?: 1–4096 (256)}` |
+| Resposta | `{"answer": "<texto>", "meta": {"tokens_prompt": n, "tokens_output": m}}` |
+| Erros | `400` payload inválido · `401` sem JWT · `500` configuração da camada · `502` resposta inválida do provedor · `503` provedor indisponível ou circuito aberto |
+
+`logs` aceita uma **string** ou **array de strings** (não vazio, sem itens
+vazios, no máx. 100_000 caracteres — guarda simples de custo). Qualquer outro
+tipo é rejeitado: nada aqui é interpretado, o conteúdo vai direto ao prompt.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/assist/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"mode": "explain", "logs": ["pedido 42 falhou no pagamento"]}'
+```
+
+### Templates de prompt (por `mode`)
+
+As instruções de sistema vivem em `MODO_ASSIST` em `core/views.py` — o mesmo
+template que o provedor real receberá:
+
+- **`summarize`** — "Você é um assistente de operações. Resuma os logs a seguir
+  de forma objetiva, destacando erros, anomalias e o que exige atenção.";
+- **`explain`** — "Você é um assistente de operações. Explique o que os logs a
+  seguir indicam, incluindo a causa provável e o próximo passo recomendado."
+
+### Endpoint `GET /api/v1/llm/metrics/`
+
+Restrito ao papel **`admin`** (`IsAdminRole`, como `/cache/metrics/`): expõe os
+contadores do processo (sucesso/falha/terminal, bloqueadas pelo breaker, tokens,
+custo estimado, latência média) + a configuração efetiva (provedor, modelo,
+timeout, preço por 1M de tokens). **Limite conhecido:** os contadores são do
+processo que atende a requisição — a agregação multi-worker e por usuário é
+pendência registada (ver issues da aula abaixo).
+
+### Limites e configuração (env)
+
+| Variável | Padrão | Significado |
+| --- | --- | --- |
+| `LLM_PROVIDER` / `LLM_MODEL` | `mock` / `mock` | provedor e modelo (hoje só o mock) |
+| `LLM_TIMEOUT_SEGUNDOS` | `5.0` | espera máxima por chamada (guarda genérica) |
+| `LLM_MAX_TENTATIVAS` | `3` | máx. tentativas em falha recuperável |
+| `LLM_BACKOFF_BASE_SEGUNDOS` / `_FATOR` | `1.0` / `2.0` | backoff exponencial |
+| `LLM_BACKOFF_JITTER` | `true` | *full jitter* entre tentativas |
+| `LLM_CB_LIMITE_FALHAS` | `5` | falhas consecutivas para ABRIR o circuito |
+| `LLM_CB_COOLDOWN_SEGUNDOS` | `30.0` | tempo em `open` antes das sondas |
+| `LLM_CB_MAX_TENTATIVAS_HALF_OPEN` | `2` | chamadas de sonda em `half-open` |
+| `LLM_REDACAO_ATIVA` | `true` | liga/desliga a redação de PII/segredos |
+| `LLM_CUSTO_INPUT_POR_1M_TOKENS` / `_OUTPUT_` | `5.00` / `15.00` | USD por 1M de tokens para a **estimativa** de custo |
+
+Os preços de custo são **números de exemplo** (o mock não cobra) — ajuste
+quando o adaptador real chegar. Tudo também está no `.env.example` e no
+`docker-compose.yml`.
+
+### Política de redação (privacidade)
+
+A redação é o "não é por causa do malicioso, é por causa do acidente" da
+LGPD/RGPD: um log que vaza um CPF ou um bearer token é um incidente mesmo que
+ninguém o tenha lido. `redacao.py` substitui por placeholders **estáveis**
+(correlacionáveis sem expor o valor):
+
+- `[EMAIL]`, `[CPF_CNPJ]`, `[TELEFONE]`, `[IP]`, `[CARTAO]` — PII clássica;
+- `[TOKEN]` — JWT/Bearer, chaves `sk-*`, strings longas de alta entropia;
+- `[SEGREDO]` — `senha=`, `password:`, `api_key=...`, `token:` em pares
+  chave/valor;
+- `[CREDENCIAL]` — credenciais embutidas em URL (`redis://user:senha@host`).
+
+A camada é **conservadora** (antes omitir demais do que deixar passar), é
+aplicada na **fronteira do provedor** independentemente do endpoint que chamar
+o `llm_service`, e é **idempotente** (uma segunda passada não altera o que já
+foi redigido).
+
+### Testes (item 4 do DoD)
+
+A camada está coberta por unidade de margem (`tests/unit/test_llm_resiliencia.py`:
+timeout, retry, `retry_after`, 429/5xx, breaker closed→open→half-open→closed e
+terminal sem retry), `test_llm_redacao.py` (matriz de padrões + bandeira
+on/off), `test_llm_metricas.py` e `test_assist_serializer.py` (payload
+inválido); a view é provada de ponta a ponta em
+`tests/integration/test_assist_endpoint.py` (401/200/400/500/502/503, redação
+de PII e `/llm/metrics` restrito ao admin). O `api/core/llm/*` voltou a entrar
+na métrica coberta (removido do `omit`).
+
+### Pendências registadas
+
+As pendências e melhorias desta aula estão como issues no
+[repositório](https://github.com/Gilgamashed/AulaAI02/issues) — ver lista em
+"Pendências técnicas registadas" mais acima.
 
 ## Referências
 

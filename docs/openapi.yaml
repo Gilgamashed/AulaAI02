@@ -1,12 +1,15 @@
 openapi: 3.1.0
 info:
   title: SynapseShop API
-  version: 1.13.0
+  version: 1.14.0
   description: |
-    Documentação OpenAPI do MVP SynapseShop (Aula 13).
+    Documentação OpenAPI do MVP SynapseShop (Aula 14).
 
     Contrato da API principal (`api/` — Django REST Framework) e do
     microsserviço complementar de estoque (`services/inventory/` — FastAPI).
+
+    A Aula 14 adicionou o assistente de IA (`POST /api/v1/assist`) e a
+    telemetria do provedor (`GET /api/v1/llm/metrics/`).
 
     ## Convenções de contrato
 
@@ -65,6 +68,10 @@ tags:
     description: Notificações geradas pelo worker
   - name: cache
     description: Métricas operacionais do cache
+  - name: assist
+    description: Assistente de IA (sumariza/explica logs operacionais)
+  - name: llm
+    description: Telemetria do provedor de IA (admin)
   - name: inventory
     description: Microsserviço de estoque (FastAPI)
 
@@ -961,6 +968,105 @@ paths:
                   categoria:detalhe:
                     hit: 2
                     miss: 2
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/assist:
+    post:
+      operationId: assistLogs
+      summary: Sumariza ou explica logs operacionais via IA (Aula 14)
+      description: |
+        Envia logs para o `llm_service` e devolve o texto gerado mais o
+        consumo de tokens. Exige JWT (autenticado de qualquer papel); o
+        throttling global `user` atua como cota de custo.
+
+        **Privacidade:** antes de chegar ao provedor, o conteúdo passa pela
+        política de redação do `llm_service` (PII/segredos viram placeholders);
+        a resposta também é redigida. **Limites:** `logs` aceita string ou
+        array (máx. 100.000 caracteres, sem itens vazios); `temperature` entre
+        0.0 e 1.0 (padrão 0.2) e `max_tokens` entre 1 e 4096 (padrão 256).
+      tags:
+        - assist
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssistRequest"
+            example:
+              mode: explain
+              logs:
+                - "pedido 42 falhou no pagamento"
+                - "timeout ao consultar o gateway"
+              temperature: 0.2
+              max_tokens: 256
+      responses:
+        "200":
+          description: Geração concluída com o consumo de tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssistResponse"
+              example:
+                answer: |
+                  O pedido 42 falhou no pagamento por timeout no gateway. Próximo
+                  passo recomendado: verificar a latência do provedor de pagamento.
+                meta:
+                  tokens_prompt: 42
+                  tokens_output: 96
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailableLlm"
+
+  /api/v1/llm/metrics/:
+    get:
+      operationId: metricasLlm
+      summary: Telemetria do provedor de IA (apenas admin)
+      description: |
+        Snapshot dos contadores do `llm_service` no processo (desfechos,
+        chamadas bloqueadas pelo circuit breaker, tokens, custo estimado e
+        latência média) com a configuração efetiva. Restrito ao papel `admin`.
+      tags:
+        - llm
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Métricas e configuração do provedor de IA.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlmMetrics"
+              example:
+                provedor: mock
+                modelo: mock
+                timeout_segundos: 5.0
+                redacao_ativa: true
+                custo_por_1m_tokens:
+                  input_usd: 5.0
+                  output_usd: 15.0
+                total:
+                  chamadas: 10
+                  bloqueadas: 1
+                  sucessos: 9
+                  falhas: 1
+                  terminais: 0
+                  tokens_prompt: 800
+                  tokens_output: 1200
+                  custo_usd: 0.022
+                  taxa_erro: 0.1
+                  latencia_media_ms: 120.5
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1980,6 +2086,117 @@ components:
               type: integer
       required: [cache_habilitado, redis, total, namespaces]
 
+    AssistRequest:
+      type: object
+      description: |
+        Entrada do `POST /api/v1/assist`. `logs` aceita uma string OU um array
+        de strings (normalizado para lista); nenhum valor é interpretado — o
+        conteúdo vai direto ao prompt (após a redação de PII).
+      properties:
+        mode:
+          type: string
+          enum: [summarize, explain]
+          description: Instrução de sistema (resumir ou explicar os logs).
+        logs:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Log(s) a analisar (máx. 100.000 caracteres).
+        temperature:
+          type: number
+          format: float
+          default: 0.2
+          minimum: 0.0
+          maximum: 1.0
+        max_tokens:
+          type: integer
+          default: 256
+          minimum: 1
+          maximum: 4096
+      required: [mode, logs]
+      example:
+        mode: summarize
+        logs:
+          - "erro de timeout no checkout"
+        temperature: 0.2
+        max_tokens: 256
+
+    AssistResponse:
+      type: object
+      description: Resposta do assistente com o consumo de tokens.
+      properties:
+        answer:
+          type: string
+          description: Texto gerado (já com a redação aplicada).
+        meta:
+          type: object
+          properties:
+            tokens_prompt:
+              type: integer
+              description: Tokens consumidos no prompt.
+            tokens_output:
+              type: integer
+              description: Tokens gerados na resposta.
+          required: [tokens_prompt, tokens_output]
+      required: [answer, meta]
+
+    LlmMetrics:
+      type: object
+      description: |
+        Telemetria do `llm_service` no processo que atendeu a requisição.
+      properties:
+        provedor:
+          type: string
+          description: Provedor configurado (hoje apenas `mock`).
+        modelo:
+          type: string
+        timeout_segundos:
+          type: number
+          description: Espera máxima por chamada (guarda genérica).
+        redacao_ativa:
+          type: boolean
+          description: Se a redação de PII/segredos está ligada.
+        custo_por_1m_tokens:
+          type: object
+          description: Preço em USD por 1M de tokens para a estimativa de custo.
+          properties:
+            input_usd:
+              type: number
+            output_usd:
+              type: number
+        total:
+          type: object
+          description: Contadores acumulados no processo.
+          properties:
+            chamadas:
+              type: integer
+              description: Invocações de `completar` que passaram do breaker.
+            bloqueadas:
+              type: integer
+              description: Fail-fast por circuito aberto (não soma em `chamadas`).
+            sucessos:
+              type: integer
+            falhas:
+              type: integer
+            terminais:
+              type: integer
+            tokens_prompt:
+              type: integer
+            tokens_output:
+              type: integer
+            custo_usd:
+              type: number
+            taxa_erro:
+              type: number
+              description: Falhas / chamadas (0.0 a 1.0).
+            latencia_ms_total:
+              type: number
+              description: Soma das latências observadas no processo (ms).
+            latencia_media_ms:
+              type: number
+
     ApiResponse:
       type: object
       description: Envelope padrão de resposta do inventory.
@@ -2207,3 +2424,36 @@ components:
             status: 503
             detail: Pedido criado, mas o evento não pôde ser publicado (broker indisponível). O pedido ficou com status 'pendente_publicacao' e pode ser republicado com manage.py republicar_pedidos.
             code: publicacao_falhou
+    ServiceUnavailableLlm:
+      description: Provedor de IA indisponível ou circuit breaker aberto.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorSchema"
+          example:
+            type: about:blank
+            title: Service Unavailable
+            status: 503
+            detail: O provedor de IA está indisponível no momento. Tente novamente mais tarde.
+    BadGateway:
+      description: O provedor de IA respondeu, mas a resposta é inválida.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorSchema"
+          example:
+            type: about:blank
+            title: Bad Gateway
+            status: 502
+            detail: O provedor de IA devolveu uma resposta inválida.
+    InternalServerError:
+      description: Configuração inválida no servidor (camada de IA).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorSchema"
+          example:
+            type: about:blank
+            title: Internal Server Error
+            status: 500
+            detail: A camada de IA está mal configurada no servidor.
