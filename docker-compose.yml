@@ -100,7 +100,25 @@ services:
       # ligada + API sem ela produziria pagamento com `simular_falha=false` e uma
       # DLQ inexplicável — que foi exatamente o que aconteceu na validação.
       PAGAMENTO_PERMITIR_SIMULACAO_FALHA: ${PAGAMENTO_PERMITIR_SIMULACAO_FALHA:-true}
-      MESSAGERIA_LOG_LEVEL: ${MESSAGERIA_LOG_LEVEL:-INFO}
+      MESSAGING_LOG_LEVEL: ${MESSAGING_LOG_LEVEL:-INFO}
+      # Aula 14 (camada de IA — llm_service). O provedor de hoje é o mock em
+      # memória: nada de rede nem de credenciais. O provedor real, quando
+      # chegar, é selecionado por `LLM_PROVIDER` e ganha aqui as suas variáveis
+      # (LLM_BASE_URL/LLM_API_KEY) — a resiliência não muda.
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_MODEL: ${LLM_MODEL:-mock}
+      LLM_TIMEOUT_SEGUNDOS: ${LLM_TIMEOUT_SEGUNDOS:-5.0}
+      LLM_MAX_TENTATIVAS: ${LLM_MAX_TENTATIVAS:-3}
+      LLM_BACKOFF_BASE_SEGUNDOS: ${LLM_BACKOFF_BASE_SEGUNDOS:-1.0}
+      LLM_BACKOFF_FATOR: ${LLM_BACKOFF_FATOR:-2.0}
+      LLM_BACKOFF_JITTER: ${LLM_BACKOFF_JITTER:-true}
+      LLM_CB_LIMITE_FALHAS: ${LLM_CB_LIMITE_FALHAS:-5}
+      LLM_CB_COOLDOWN_SEGUNDOS: ${LLM_CB_COOLDOWN_SEGUNDOS:-30.0}
+      LLM_CB_MAX_TENTATIVAS_HALF_OPEN: ${LLM_CB_MAX_TENTATIVAS_HALF_OPEN:-2}
+      LLM_LOG_LEVEL: ${LLM_LOG_LEVEL:-INFO}
+      LLM_REDACAO_ATIVA: ${LLM_REDACAO_ATIVA:-true}
+      LLM_CUSTO_INPUT_POR_1M_TOKENS: ${LLM_CUSTO_INPUT_POR_1M_TOKENS:-5.00}
+      LLM_CUSTO_OUTPUT_POR_1M_TOKENS: ${LLM_CUSTO_OUTPUT_POR_1M_TOKENS:-15.00}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s

@@ -8,9 +8,11 @@ from rest_framework_simplejwt.views import (
 
 from .throttling import ThrottleMemoriaScope
 from .views import (
+    AssistView,
     CacheMetricsView,
     CategoryViewSet,
     ItemViewSet,
+    LlmMetricsView,
     NotificacaoViewSet,
     PedidoViewSet,
 )
@@ -71,4 +73,10 @@ urlpatterns = [
         CacheMetricsView.as_view(),
         name="cache-metrics",
     ),
+    # Aula 14: `POST /api/v1/assist` — sumariza/explica logs via llm_service.
+    # Exige JWT (ver AssistView); a cota de custo é o throttling `user`.
+    path("assist/", AssistView.as_view(), name="assist"),
+    # Aula 14: telemetria do llm_service (latência, taxa de erro, tokens,
+    # custo estimado). Restrito ao papel admin — ver LlmMetricsView.
+    path("llm/metrics/", LlmMetricsView.as_view(), name="llm-metrics"),
 ] + router.urls

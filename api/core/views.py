@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -17,10 +18,19 @@ from rest_framework.views import APIView
 from . import cache as cache_api
 from .cache_metrics import cache_metrics
 from .filters import ItemFilter
+from .llm import (
+    CircuitoAberto,
+    LlmConfiguracaoInvalida,
+    LlmIndisponivel,
+    LlmTerminal,
+    criar_llm_service,
+)
+from .llm.metricas import llm_metrics
 from .messaging import broker as mensageria
 from .models import Category, Item, Notificacao, Pagamento, Pedido
 from .permissions import IsAdminRole
 from .serializers import (
+    AssistSerializer,
     CategorySerializer,
     ItemDetalheSerializer,
     ItemSerializer,
@@ -30,6 +40,8 @@ from .serializers import (
     PedidoCreateSerializer,
     PedidoSerializer,
 )
+
+logger = logging.getLogger("core.llm")
 
 
 def health(request):
@@ -901,3 +913,150 @@ class CacheMetricsView(APIView):
 
     def _key_prefix(self) -> str:
         return settings.CACHES["default"].get("KEY_PREFIX", "")
+
+
+# =====================================================================
+# Aula 14 — Assistente de IA (`POST /api/v1/assist`)
+# =====================================================================
+# As instruções de sistema por modo são o "template de prompt" da iteração:
+# `summarize` pede o resumo operacional; `explain` pede a explicação com causa
+# provável e próximo passo. O provedor de hoje é o mock (devolve o texto em
+# eco); o template é o mesmo que o provedor real receberá.
+MODO_ASSIST = {
+    "summarize": (
+        "Você é um assistente de operações. Resuma os logs a seguir de forma "
+        "objetiva, destacando erros, anomalias e o que exige atenção."
+    ),
+    "explain": (
+        "Você é um assistente de operações. Explique o que os logs a seguir "
+        "indicam, incluindo a causa provável e o próximo passo recomendado."
+    ),
+}
+
+
+class AssistView(APIView):
+    """`POST /api/v1/assist` — sumariza ou explica logs via `llm_service`.
+
+    Exige autenticação (JWT): é uma operação que consome tokens do provedor e
+    recebe logs que podem conter dados sensíveis — o mesmo motivo pelo qual
+    pedidos e pagamentos não são públicos. O throttling `user` (100/min, global
+    no DRF) já atua como cota de custo por usuário.
+
+    A view é fina de propósito: valida a entrada, delega ao `llm_service` (que
+    concentra timeout, retry e circuit breaker) e traduz o desfecho para HTTP.
+    O `LlmTerminal` (ex.: resposta malformada do provedor) vira **502** — a
+    culpa não é do cliente; `CircuitoAberto`/`LlmIndisponivel` viram **503**
+    (tente de novo mais tarde); configuração inválida vira **500**.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request) -> Response:
+        serializer = AssistSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        dados = serializer.validated_data
+
+        try:
+            servico = criar_llm_service()
+            resposta = servico.completar(
+                self._mensagens(dados["mode"], dados["logs"]),
+                temperature=dados["temperature"],
+                max_tokens=dados["max_tokens"],
+            )
+        except LlmConfiguracaoInvalida as falha:
+            logger.error(
+                "llm_service mal configurado",
+                extra={
+                    "evento": "AssistConfiguracaoInvalida",
+                    "resultado": "erro",
+                    "erro": str(falha),
+                },
+            )
+            return Response(
+                {"detail": "A camada de IA está mal configurada no servidor."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        except (CircuitoAberto, LlmIndisponivel) as falha:
+            logger.warning(
+                "provedor de IA indisponível",
+                extra={
+                    "evento": "AssistIndisponivel",
+                    "resultado": "erro",
+                    "erro": str(falha),
+                },
+            )
+            return Response(
+                {
+                    "detail": (
+                        "O provedor de IA está indisponível no momento. "
+                        "Tente novamente mais tarde."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except LlmTerminal as falha:
+            logger.warning(
+                "provedor de IA devolveu resposta inválida",
+                extra={
+                    "evento": "AssistTerminal",
+                    "resultado": "erro",
+                    "erro": str(falha),
+                },
+            )
+            return Response(
+                {"detail": "O provedor de IA devolveu uma resposta inválida."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        # Contrato do DoD: a resposta gerada e os metadados de consumo de tokens.
+        return Response(
+            {
+                "answer": resposta.texto,
+                "meta": {
+                    "tokens_prompt": resposta.tokens_prompt,
+                    "tokens_output": resposta.tokens_output,
+                },
+            }
+        )
+
+    @staticmethod
+    def _mensagens(mode: str, logs: list[str]) -> list[dict[str, str]]:
+        """Monta a conversa (system + user) que vai para o provedor."""
+        return [
+            {"role": "system", "content": MODO_ASSIST[mode]},
+            {"role": "user", "content": "\n".join(logs)},
+        ]
+
+
+class LlmMetricsView(APIView):
+    """`GET /api/v1/llm/metrics/` — telemetria do `llm_service` (Aula 14).
+
+    Expõe os contadores do processo: desfechos (sucesso/falha/terminal), as
+    chamadas bloqueadas pelo circuit breaker, tokens consumidos, custo estimado
+    e latência média — além da configuração efetiva (provedor, modelo, timeout,
+    preços por 1M de tokens) para que o operador saiba com que base os números
+    foram calculados.
+
+    Restrita ao papel `admin` (`IsAdminRole`, como o `/cache/metrics/`): é
+    informação operacional e de custo. Limite conhecido: são contadores do
+    processo que atende a requisição (ver docstring de `core/llm/metricas.py`).
+    """
+
+    permission_classes = [IsAdminRole]
+
+    def get(self, request) -> Response:
+        return Response(
+            {
+                "provedor": getattr(settings, "LLM_PROVIDER", "mock"),
+                "modelo": getattr(settings, "LLM_MODEL", "mock"),
+                "timeout_segundos": getattr(settings, "LLM_TIMEOUT_SEGUNDOS", 5.0),
+                "redacao_ativa": getattr(settings, "LLM_REDACAO_ATIVA", True),
+                "custo_por_1m_tokens": {
+                    "input_usd": getattr(settings, "LLM_CUSTO_INPUT_POR_1M_TOKENS", 0.0),
+                    "output_usd": getattr(
+                        settings, "LLM_CUSTO_OUTPUT_POR_1M_TOKENS", 0.0
+                    ),
+                },
+                "total": llm_metrics.snapshot(),
+            }
+        )

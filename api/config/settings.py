@@ -477,6 +477,57 @@ PAGAMENTO_PERMITIR_SIMULACAO_FALHA = _env_flag(
 )
 
 # =====================================================================
+# Aula 14 — Camada de IA: llm_service
+# =====================================================================
+# O item 1 da spec constrói a resiliência da comunicação com o provedor de IA:
+# timeout (<=5s), retry com backoff exponencial + jitter (3 tentativas) e
+# circuit breaker (closed/open/half-open). O provedor de HOJE é um **mock** em
+# memória (LLM_PROVIDER=mock): o sistema não depende de nenhuma API externa nem
+# de credenciais e fica pronto para receber o provedor real no futuro — entra um
+# adaptador que cumpre `core.llm.portas.ProvedorLlm` e a fábrica passa a
+# selecioná-lo por esta mesma variável, sem mudar a resiliência.
+#
+#   LLM_PROVIDER             -> provedor selecionado ('mock' é o único hoje).
+#   LLM_MODEL                -> modelo endereçado (informacional enquanto o
+#                               provedor é o mock; usado no log e, no futuro, no
+#                               corpo do completamento).
+#   LLM_TIMEOUT_SEGUNDOS     -> deadline da guarda genérica do LlmService
+#                               (limiar da spec: <=5s).
+#   LLM_MAX_TENTATIVAS       -> execuções da chamada (spec: 3).
+#   LLM_BACKOFF_BASE_SEGUNDOS / LLM_BACKOFF_FATOR -> base do backoff exponencial.
+#   LLM_BACKOFF_JITTER       -> true ativa o *full jitter* no atraso.
+#   LLM_CB_LIMITE_FALHAS     -> falhas consecutivas para abrir o circuito.
+#   LLM_CB_COOLDOWN_SEGUNDOS -> tempo em 'open' antes de sondar (half-open).
+#   LLM_CB_MAX_TENTATIVAS_HALF_OPEN -> chamadas de sonda em half-open.
+#   LLM_REDACAO_ATIVA        -> false desliga a redação de PII/segredos antes de
+#                               enviar ao provedor e de logar (default true; só
+#                               desligue em desenvolvimento/benchmark).
+#   LLM_CUSTO_INPUT_POR_1M_TOKENS / LLM_CUSTO_OUTPUT_POR_1M_TOKENS -> preço em
+#                               USD por 1 milhão de tokens (input/output) para a
+#                               ESTIMATIVA de custo por chamada. Os defaults são
+#                               números de exemplo (o mock não cobra); ajuste
+#                               para o provedor real quando o adaptador chegar.
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mock").strip().lower()
+LLM_MODEL = os.environ.get("LLM_MODEL", "mock")
+LLM_TIMEOUT_SEGUNDOS = float(os.environ.get("LLM_TIMEOUT_SEGUNDOS", "5.0"))
+LLM_MAX_TENTATIVAS = int(os.environ.get("LLM_MAX_TENTATIVAS", "3"))
+LLM_BACKOFF_BASE_SEGUNDOS = float(os.environ.get("LLM_BACKOFF_BASE_SEGUNDOS", "1.0"))
+LLM_BACKOFF_FATOR = float(os.environ.get("LLM_BACKOFF_FATOR", "2.0"))
+LLM_BACKOFF_JITTER = _env_flag("LLM_BACKOFF_JITTER", "True")
+LLM_CB_LIMITE_FALHAS = int(os.environ.get("LLM_CB_LIMITE_FALHAS", "5"))
+LLM_CB_COOLDOWN_SEGUNDOS = float(os.environ.get("LLM_CB_COOLDOWN_SEGUNDOS", "30.0"))
+LLM_CB_MAX_TENTATIVAS_HALF_OPEN = int(
+    os.environ.get("LLM_CB_MAX_TENTATIVAS_HALF_OPEN", "2")
+)
+LLM_REDACAO_ATIVA = _env_flag("LLM_REDACAO_ATIVA", "True")
+LLM_CUSTO_INPUT_POR_1M_TOKENS = float(
+    os.environ.get("LLM_CUSTO_INPUT_POR_1M_TOKENS", "5.00")
+)
+LLM_CUSTO_OUTPUT_POR_1M_TOKENS = float(
+    os.environ.get("LLM_CUSTO_OUTPUT_POR_1M_TOKENS", "15.00")
+)
+
+# =====================================================================
 # Aula 8 — Logging estruturado (JSON) do cache
 # =====================================================================
 # Um logger dedicado ("core.cache") emite UMA LINHA JSON por evento de
@@ -511,6 +562,14 @@ LOGGING = {
         "core.messaging": {
             "handlers": ["console"],
             "level": os.environ.get("MESSAGING_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+        # Aula 14: um logger dedicado para eventos da camada de IA
+        # (resposta gerada, tentativa falhada, transição do circuito).
+        # Filtro por `"core.llm"` no `docker compose logs -f api`.
+        "core.llm": {
+            "handlers": ["console"],
+            "level": os.environ.get("LLM_LOG_LEVEL", "INFO"),
             "propagate": False,
         },
     },

@@ -366,3 +366,79 @@ class NotificacaoSerializer(serializers.ModelSerializer):
             "enviada_em",
         ]
         read_only_fields = fields
+
+
+# =====================================================================
+# Aula 14 — Endpoint de assistência (/api/v1/assist)
+# =====================================================================
+
+
+class AssistSerializer(serializers.Serializer):
+    """Entrada do `POST /api/v1/assist`.
+
+    O corpo mínimo da spec é `{ "mode", "logs", "temperature", "max_tokens" }`:
+
+    - `mode` decide a instrução de sistema (sumarizar ou explicar os logs);
+    - `logs` aceita **string ou array de strings** (a spec permite os dois) e é
+      normalizado para lista — é o que será unido e mandado ao provedor;
+    - `temperature` e `max_tokens` controlam a geração; `max_tokens` tem
+      padrão 256 e é limitado a 4096 para não queimar tokens num corpo que o
+      provedor nem leria.
+    """
+
+    MODOS = [("summarize", "summarize"), ("explain", "explain")]
+
+    # Total de caracteres aceitos nos logs: guarda simples de custo — um único
+    # request não pode mandar um payload que estoure o orçamento de tokens.
+    LOGS_MAX_CARACTERES = 100_000
+
+    mode = serializers.ChoiceField(choices=MODOS)
+    logs = serializers.JSONField()
+    temperature = serializers.FloatField(
+        default=0.2, min_value=0.0, max_value=1.0
+    )
+    max_tokens = serializers.IntegerField(
+        default=256, min_value=1, max_value=4096
+    )
+
+    def validate_logs(self, value):
+        """Aceita `str` ou `list[str]` e devolve sempre uma lista de textos.
+
+        Um log único chega como string (`"..."`), vários chegam como array
+        (`["...", "..."]`). Qualquer outro tipo (número, objeto) é um cliente
+        errado: nada aqui é interpretado — o que for enviado vai direto para o
+        prompt do provedor.
+        """
+        if isinstance(value, str):
+            textos = [value]
+        elif isinstance(value, list):
+            textos = value
+        else:
+            raise serializers.ValidationError(
+                "'logs' precisa ser uma string ou uma lista de strings."
+            )
+
+        normalizados: list[str] = []
+        for texto in textos:
+            if not isinstance(texto, str):
+                raise serializers.ValidationError(
+                    "Cada item de 'logs' precisa ser uma string."
+                )
+            limpo = texto.strip()
+            if not limpo:
+                raise serializers.ValidationError(
+                    "'logs' não pode conter itens vazios."
+                )
+            normalizados.append(limpo)
+
+        if not normalizados:
+            raise serializers.ValidationError(
+                "'logs' não pode ser uma lista vazia: não há o que analisar."
+            )
+
+        total = sum(len(t) for t in normalizados)
+        if total > self.LOGS_MAX_CARACTERES:
+            raise serializers.ValidationError(
+                f"'logs' excede o limite de {self.LOGS_MAX_CARACTERES} caracteres."
+            )
+        return normalizados
