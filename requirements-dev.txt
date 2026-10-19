@@ -20,13 +20,9 @@
 # pytest-django  : roda o Django sob pytest (cria o banco de teste efêmero,
 #                  expõe a fixture `db` e lê o DJANGO_SETTINGS_MODULE).
 # pytest-cov     : recolhe a cobertura de código.
-# freezegun      : congela o relógio — a spec pede um "relógio fixo" para que
-#                  timestamp de contrato e janela de dedupe não variem entre
-#                  execuções.
 pytest>=8.3,<9.0
 pytest-django>=4.9,<5.0
 pytest-cov>=6.0,<7.0
-freezegun>=1.5,<2.0
 # httpx: transporte HTTP do `starlette.testclient.TestClient` (FastAPI). Sem
 # ele, os testes de integração do inventory não têm com o que rodar — o
 # TestClient usa o componente `httpx` em vez do `requests`.

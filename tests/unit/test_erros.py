@@ -84,3 +84,18 @@ def test_texto_com_quebra_de_linha_sobrevive():
 
     assert resultado.startswith("RuntimeError: ")
     assert "linha 2" in resultado
+
+
+def test_umachance_unica_reexportada_pela_mensageria_e_pelo_llm():
+    """`core.erros.descrever` é a implementação; os outros caminhos re-exportam.
+
+    Antes desta unificação a função existia duas vezes, byte a byte, em
+    `core.messaging.erros` e `core.llm.erros` — e já havia uma terceira
+    cópia (`kafka_admin.descrever_erro`) que é outra função e continua
+    sendo. Este teste é a regressão que impede as cópias voltarem.
+    """
+    from core.erros import descrever as canonica
+    from core.llm.erros import descrever as do_llm
+
+    assert canonica is descrever
+    assert do_llm is descrever

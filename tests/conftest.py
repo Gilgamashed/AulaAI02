@@ -1,10 +1,10 @@
 """Fixtures e mocks globais da suíte (Aula 12).
 
 Este arquivo é o ponto único de isolamento. A spec pede fixtures para a
-aplicação de teste, cliente HTTP, banco efêmero e relógio fixo, além de
-mocks para as dependências externas; aqui todas moram juntas porque é a
-possibilidade de um teste quebrar por vazamento de estado que decide se a
-suíte é confiável.
+aplicação de teste, cliente HTTP e banco efêmero, além de mocks para as
+dependências externas; aqui todas moram juntas porque é a possibilidade de
+um teste quebrar por vazamento de estado que decide se a suíte é
+confiável.
 
 Três decisões estruturam o resto:
 
@@ -25,43 +25,20 @@ asserção do seguinte — que é a receita clássica de teste intermitente.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.cache import caches
-from freezegun import freeze_time
 
-# =====================================================================
-# Relógio fixo
-# =====================================================================
-# A spec pede explicitamente um "relógio fixo". Duas razões, e a segunda é
-# a que costuma doer:
-#
-#  - timestamp de contrato (`_envelope_comum` em contracts.py) entra no
-#    dicionário serializado; um teste que compara o payload inteiro passaria
-#    ou falharia conforme o minuto em que rodou;
-#  - janela de dedupe e TTL são calculados a partir de `time.time()`, então
-#    um teste de expiração precisa de um tempo que não anda.
-#
-# `tick=False` é o detalhe que importa: sem ele o relógio congelado avança
-# 1 segundo a cada chamada, o que torna um TTL de 5s expirar no meio do
-# próprio teste.
-INSTANTE_FIXO = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
-
-
-@pytest.fixture
-def relogio_fixo():
-    """Congela o tempo em um instante fixo (UTC).
-
-    Uso: `with relogio_fixo():` no corpo do teste. É o formato explícito em
-    vez de fixture `autouse` porque congelar o relógio globalmente quebraria
-    a expiração de token JWT e a própria resolução do Django.
-    """
-    return freeze_time(INSTANTE_FIXO, tick=False)
-
+if TYPE_CHECKING:
+    # Só nas anotações dos fakes do inventário (repo/service); o import em
+    # tempo de execução continua dentro dos fixtures, para não exigir o
+    # pacote FastAPI em testes que nunca tocam o microsserviço.
+    from app.models import InventoryItem
+    from app.services.inventory import InventoryService
 
 # =====================================================================
 # Isolamento de estado (autouse)
@@ -315,10 +292,9 @@ def inventory_client(inventory_service_fake: InventoryService):
     SQLAlchemy é criada pela suíte, mesmo nos endpoints que em produção fazem
     `get_session()`.
     """
-    from fastapi.testclient import TestClient
-
     from app.dependencies import get_inventory_service
     from app.main import app
+    from fastapi.testclient import TestClient
 
     app.dependency_overrides[get_inventory_service] = lambda: inventory_service_fake
     with TestClient(app) as client:

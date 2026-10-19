@@ -11,12 +11,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-
 from core.llm.circuit_breaker import CircuitBreaker
 from core.llm.erros import CircuitoAberto, LlmErroServidor, LlmIndisponivel
 from core.llm.metricas import FALHA, SUCESSO, TERMINAL, llm_metrics
 from core.llm.mock import ProvedorMock
-from core.llm.portas import LlmResposta
 from core.llm.retry import RetryPolicy
 from core.llm.servico import LlmService
 

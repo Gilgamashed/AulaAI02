@@ -93,7 +93,6 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
-import math
 import os
 import statistics
 import subprocess
@@ -105,6 +104,9 @@ import urllib.parse
 import urllib.request
 from base64 import b64encode
 from concurrent.futures import ThreadPoolExecutor
+
+from _medicao import cabecalhos as _headers
+from _medicao import percentil
 
 ITENS_PATH = "/api/v1/items/"
 PEDIDOS_PATH = "/api/v1/pedidos/"
@@ -233,15 +235,6 @@ def _registrar_indisponivel(espera: float) -> None:
         _ABSORVIDOS["espera_conexao_s"] += espera
 
 
-def _headers(token: str | None, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """JSON puro (nada de HTML da browsable API) + JWT + extras."""
-    headers = {"Accept": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    headers.update(extra or {})
-    return headers
-
-
 def request(
     url: str,
     token: str | None = None,
@@ -311,15 +304,6 @@ def request(
         except json.JSONDecodeError:
             payload = {"raw": bruto[:200].decode("utf-8", "replace")}
         return status, payload, latencia_ms
-
-
-def percentil(amostras: list[float], p: float) -> float:
-    """Percentil pelo rank mais próximo (p95 = 95% abaixo dele)."""
-    if not amostras:
-        return 0.0
-    ordenadas = sorted(amostras)
-    posicao = max(1, math.ceil(p / 100 * len(ordenadas)))
-    return ordenadas[posicao - 1]
 
 
 def resumir(nome: str, amostras: list[float]) -> dict:

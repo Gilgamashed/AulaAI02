@@ -35,7 +35,6 @@ garantia: enquanto o efeito não está confirmado, o worker não puxa a próxima
 
 from __future__ import annotations
 
-import json
 import logging
 import signal
 import time
@@ -51,10 +50,17 @@ from .. import models
 from . import dedupe
 from .contracts import ContratoInvalido, PedidoCriado, validar_pedido_criado
 from .erros import descrever
+from .excecoes import FalhaInjetada, MensagemIncorreta
 from .metricas import DLQ, DUPLICADO, FALHA, PROCESSADO, mensageria_metrics
+from .politica import (
+    Destino,
+    decidir_reentrega,
+    degrau_de,
+    desserializar_corpo,
+    tentativa_de,
+)
 from .produtor import com_tentativa, republicar
 from .topologia import (
-    HEADER_TENTATIVA,
     Topologia,
     abrir_conexao,
     declarar_topologia,
@@ -69,29 +75,6 @@ ESTADOS_PROCESSAVEIS = (
     models.Pedido.PENDENTE_PUBLICACAO,
     models.Pedido.FALHA,
 )
-
-
-class MensagemIncorreta(Exception):
-    """Falha TERMINAL: reentregar não muda nada, então vai direto para a DLQ.
-
-    Difere de uma exceção qualquer do banco, que pode ser transitória. Aqui a
-    mensagem está logicamente errada: o pedido não existe, ou a chave de
-    idempotência não é a do pedido. Reprocessar dez vezes reproduz o mesmo
-    erro e só gasta broker.
-    """
-
-
-class FalhaInjetada(Exception):
-    """Falha **de propósito** (header `X-Simular-Falha` no POST).
-
-    Não é um bug: é o mecanismo que prova, ponta a ponta e a cada aula, que a
-    escada de reentrega e a DLQ funcionam de verdade — com um pedido real, um
-    log por tentativa e a mensagem parada em `pedidos.criados.dlq` no fim.
-
-    Recupéravel por definição (é uma exceção comum no laço), então segue o
-    mesmo caminho de qualquer falha transitória: reentrega com backoff e, ao
-    esgotar, DLQ.
-    """
 
 
 class Consumidor:
@@ -389,11 +372,7 @@ class Consumidor:
         dead-letter e TTL). Preferimos o nosso porque sobrevive a qualquer
         manipulação que o broker faça na mensagem e fica explícito no código.
         """
-        headers = propriedades.headers or {}
-        try:
-            return int(headers.get(HEADER_TENTATIVA, 0))
-        except (TypeError, ValueError):
-            return 0
+        return tentativa_de(propriedades.headers)
 
     @staticmethod
     def _validar(corpo: bytes) -> PedidoCriado:
@@ -405,11 +384,7 @@ class Consumidor:
         falhar no contrato — com o despachante, ele passaria pela validação e
         só cairia no efeito, depois de já ter passado pela janela de dedupe.
         """
-        try:
-            bruto = json.loads(corpo.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as erro:
-            raise ContratoInvalido(f"corpo não é JSON UTF-8 válido: {erro}") from erro
-        return validar_pedido_criado(bruto)
+        return validar_pedido_criado(desserializar_corpo(corpo))
 
     def _aplicar_efeito(self, evento: PedidoCriado, tentativa: int) -> bool:
         """Aplica o estado do pedido. Devolve `True` se o efeito foi aplicado.
@@ -500,40 +475,38 @@ class Consumidor:
         degraus = len(settings.PEDIDO_BACKOFF_SEGUNDOS)
         motivo = descrever(erro)
 
-        # `tentativa >= max_reentregas`: a escada acabou. Já `tentativa + 1 >
-        # degraus`: a política pede mais reentregas do que existem degraus
-        # configurados — sem fila de retry para este degrau, a única rota
-        # honesta é a DLQ (e o log deixa isso explícito).
-        if tentativa >= max_reentregas:
-            # A escada acabou: o pedido fica `falha` e a mensagem na DLQ. O
-            # registro no banco é o que permite responder "o que aconteceu
-            # com este pedido?" pelo `GET /pedidos/{id}`.
-            self._registrar_falha(evento, motivo, terminal=True)
-            self._mandar_para_dlq(
-                canal, metodo, propriedades, corpo, tentativa, motivo=motivo
-            )
-            return
-        if tentativa + 1 > degraus:
-            logger.error(
-                "política de reentrega inconsistente: faltam degraus de backoff",
-                extra={
-                    "evento": "PoliticaInconsistente",
-                    "resultado": "erro",
-                    "pedido_id": evento.pedido_id,
-                    "tentativa": tentativa,
-                    "detalhe": (
-                        f"max_reentregas={max_reentregas} > "
-                        f"degraus configurados={degraus}"
-                    ),
-                },
-            )
+        destino = decidir_reentrega(
+            tentativa, max_reentregas=max_reentregas, degraus=degraus
+        )
+        if destino is not Destino.RETRY:
+            # `DLQ_ESGOTADA`: a escada acabou, o pedido fica `falha` e a
+            # mensagem vai para a DLQ — o registro no banco é o que permite
+            # responder "o que aconteceu com este pedido?" pelo
+            # `GET /pedidos/{id}`. `DLQ_SEM_DEGRAU`: a política pede mais
+            # reentregas do que existem degraus configurados — sem fila de
+            # retry para este degrau, a única rota honesta é a DLQ (e o log
+            # deixa isso explícito).
+            if destino is Destino.DLQ_SEM_DEGRAU:
+                logger.error(
+                    "política de reentrega inconsistente: faltam degraus de backoff",
+                    extra={
+                        "evento": "PoliticaInconsistente",
+                        "resultado": "erro",
+                        "pedido_id": evento.pedido_id,
+                        "tentativa": tentativa,
+                        "detalhe": (
+                            f"max_reentregas={max_reentregas} > "
+                            f"degraus configurados={degraus}"
+                        ),
+                    },
+                )
             self._registrar_falha(evento, motivo, terminal=True)
             self._mandar_para_dlq(
                 canal, metodo, propriedades, corpo, tentativa, motivo=motivo
             )
             return
 
-        degrau = tentativa + 1
+        degrau = degrau_de(tentativa)
         try:
             republicar(
                 canal,

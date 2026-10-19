@@ -18,16 +18,7 @@ detalhes úteis no `__str__` de alguns erros e nada em outros.
 
 from __future__ import annotations
 
-
-def descrever(exc: BaseException) -> str:
-    """Devolve `TipoDaExcecao: mensagem`, ou só o tipo se a mensagem for vazia.
-
-    Serve para todos os campos `erro`/`motivo` do logger `core.messaging`,
-    incluindo o `motivo_falha` gravado em `Pedido`: um motivo vazio no banco é
-    impossível de diagnosticar depois, quando o processo já morreu.
-    """
-    nome = type(exc).__name__
-    mensagem = str(exc).strip()
-    if not mensagem:
-        return nome
-    return f"{nome}: {mensagem}"
+# Implementação única em `core.erros` (módulo pai); o re-export mantém o
+# caminho histórico `core.messaging.erros.descrever` estável para os
+# consumidores, productores e commands que já importam daqui.
+from ..erros import descrever as descrever

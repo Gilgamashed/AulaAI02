@@ -52,12 +52,10 @@ from . import contracts, kafka_admin
 from .broker import PublicacaoFalhou
 from .erros import descrever
 from .kafka_topologia import (
-    HEADER_EVENTO_ID,
-    HEADER_MOTIVO,
-    HEADER_TENTATIVA,
     TopologiaKafka,
     config_produtor,
 )
+from .politica import HEADER_EVENTO_ID, HEADER_MOTIVO, HEADER_TENTATIVA
 
 logger = logging.getLogger("core.messaging")
 
@@ -466,8 +464,7 @@ def _log_falha_pagamento(
             "erro": descrever(erro),
             "motivo": (
                 "pagamento mantido em 'registrado'; reenvie o POST em "
-                "/api/v1/pedidos/%s/pagamento/ para republicar o evento"
-                % pagamento.pedido_id
+                f"/api/v1/pedidos/{pagamento.pedido_id}/pagamento/ para republicar o evento"
             ),
         },
     )

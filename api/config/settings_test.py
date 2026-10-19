@@ -32,8 +32,6 @@ O que este módulo muda em relação a `config.settings`:
    esperam.
 """
 
-from datetime import timedelta
-
 from .settings import *  # noqa: F403 — herda tudo o que não é isolado abaixo
 
 # =====================================================================
@@ -100,13 +98,10 @@ DEBUG = False
 # independente do ambiente de quem a executa.
 SECRET_KEY = "chave-de-teste-nao-usar-em-producao"
 JWT_SIGNING_KEY = "chave-de-assinatura-de-teste-nao-usar-em-producao"
-SIMPLE_JWT = {  # noqa: F405
-    **SIMPLE_JWT,  # noqa: F405
-    # Token curto e determinístico: o teste que expira token não precisa
-    # esperar, e o freeze do relógio torna a expiração previsível.
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
-}
+# `SIMPLE_JWT` NÃO é sobrescrito aqui: a produção já usa
+# `ACCESS_TOKEN_LIFETIME=5min` e `REFRESH_TOKEN_LIFETIME=1dia`, curtos o
+# bastante para o teste de expiração trabalhar com freeze do relógio.
+# Redefinir os mesmos valores era só ruído que escondia a configuração real.
 
 # =====================================================================
 # 4) Mensageria: nunca sair para o broker

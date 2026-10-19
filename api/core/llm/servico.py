@@ -92,11 +92,13 @@ class LlmService:
 
         mensagens_seguras = self._redigir_mensagens(mensagens)
         inicio = time.monotonic()
-        chamada: Callable[[], LlmResposta] = lambda: self._com_timeout(
-            lambda: self._provedor.completar(
-                mensagens_seguras, temperature=temperature, max_tokens=max_tokens
+
+        def chamada() -> LlmResposta:
+            return self._com_timeout(
+                lambda: self._provedor.completar(
+                    mensagens_seguras, temperature=temperature, max_tokens=max_tokens
+                )
             )
-        )
 
         try:
             resposta = self._retry.executar(chamada)

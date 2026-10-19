@@ -101,13 +101,10 @@ from django.conf import settings
 
 logger = logging.getLogger("core.messaging")
 
-# Cabeçalhos Kafka usados pela política de reentrega. São os MESMOS nomes do
-# AMQP (`topologia.HEADER_TENTATIVA` etc.) de propósito: a tabela de
-# equivalência broker × broker fica trivial de conferir, e o contrato escrito
+# Cabeçalhos Kafka da política de reentrega são definidos em `politica.py`,
+# fonte única compartilhada com o AMQP: a tabela de equivalência broker ×
+# broker fica trivial de conferir, e o contrato escrito
 # (`docs/contracts/pedido_criado.md`) descreve um evento, não um transporte.
-HEADER_TENTATIVA = "x-tentativa"
-HEADER_EVENTO_ID = "x-evento-id"
-HEADER_MOTIVO = "x-motivo"
 
 # A retenção de um tópico de retry precisa ser MAIOR que o backoff do degrau,
 # porque no Kafka a expiração da retenção **apaga** a mensagem em vez de

@@ -15,6 +15,11 @@ de retry decide a partir delas:
 
 from __future__ import annotations
 
+# `Tipo: mensagem` para os logs JSON — ou só o tipo quando sem mensagem.
+# Implementação única em `core.erros` (a mesma da mensageria); o re-export
+# mantém o caminho `core.llm.erros.descrever` estável para retry/servico.
+from ..erros import descrever as descrever
+
 
 class LlmErro(Exception):
     """Erro base de toda a camada de IA."""
@@ -70,17 +75,3 @@ class LlmIndisponivel(LlmErro):
 
 class CircuitoAberto(LlmIndisponivel):
     """O circuit breaker recusou a chamada antes de ela chegar ao provedor."""
-
-
-def descrever(exc: BaseException) -> str:
-    """`Tipo: mensagem` para os logs JSON — ou só o tipo quando sem mensagem.
-
-    Várias exceções de transporte são levantadas sem argumentos e `str(exc)`
-    devolveria `""`; o tipo da exceção precisa entrar sempre no log (mesma regra
-    de `core.messaging.erros.descrever`).
-    """
-    nome = type(exc).__name__
-    mensagem = str(exc).strip()
-    if not mensagem:
-        return nome
-    return f"{nome}: {mensagem}"

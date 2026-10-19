@@ -339,7 +339,7 @@ services:
       # marcação gravada, igual ao `worker-kafka` no fluxo de pedidos — é o
       # mesmo desenho nos dois. Colocar a flag aqui criaria a promessa de um
       # interruptor de worker que não existe.
-      MESSAGING_LOG_LEVEL: ${MESSAGERIA_LOG_LEVEL:-INFO}
+      MESSAGING_LOG_LEVEL: ${MESSAGING_LOG_LEVEL:-INFO}
       DRF_ANON_RATE: ${DRF_ANON_RATE:-20/min}
       DRF_USER_RATE: ${DRF_USER_RATE:-100/min}
 

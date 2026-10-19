@@ -52,7 +52,6 @@ consome `pedidos.criados` mesmo com a mesma imagem e o mesmo código.
 
 from __future__ import annotations
 
-import json
 import logging
 import signal
 import threading
@@ -66,17 +65,24 @@ from django.utils import timezone
 
 from .. import models, notificacoes
 from . import dedupe, kafka_admin, kafka_produtor
-from .broker import FLUXO_PEDIDOS, FLUXO_PAGAMENTOS
-from .contracts import ContratoInvalido, PedidoCriado, PagamentoRegistrado, validar
+from .broker import FLUXO_PAGAMENTOS, FLUXO_PEDIDOS
+from .contracts import ContratoInvalido, PagamentoRegistrado, PedidoCriado, validar
 from .erros import descrever
+from .excecoes import FalhaInjetada, MensagemIncorreta
 from .kafka_replayer import Replayer
 from .kafka_topologia import (
-    HEADER_TENTATIVA,
     TopologiaKafka,
     config_consumidor,
     topico_desconhecido,
 )
 from .metricas import DLQ, DUPLICADO, FALHA, PROCESSADO, mensageria_metrics
+from .politica import (
+    Destino,
+    decidir_reentrega,
+    degrau_de,
+    desserializar_corpo,
+    tentativa_de,
+)
 
 logger = logging.getLogger("core.messaging")
 
@@ -100,30 +106,6 @@ ESTADOS_PROCESSAVEIS = (
 # `aprovado`/`recusado` ficam fora de propósito pelo mesmo motivo — são a guarda
 # contra o efeito duplicado no banco.
 ESTADOS_PAGAMENTO_PROCESSAVEIS = (models.Pagamento.REGISTRADO,)
-
-
-class MensagemIncorreta(Exception):
-    """Falha TERMINAL: reentregar não muda nada, então vai direto para a DLQ.
-
-    Difere de uma exceção qualquer do banco, que pode ser transitória. Aqui a
-    mensagem está logicamente errada: o pedido não existe, ou a chave de
-    idempotência não é a do pedido. Reprocessar dez vezes reproduz o mesmo
-    erro e só gasta broker.
-    """
-
-
-class FalhaInjetada(Exception):
-    """Falha **de propósito** (header `X-Simular-Falha` no POST).
-
-    Não é um bug: é o mecanismo que prova, ponta a ponta, que a escada de
-    reentrega e a DLQ funcionam de verdade — com uma entidade real, um log por
-    tentativa e a mensagem parada na DLQ do fluxo no fim
-    (`pedidos.criados.dlq` ou `pagamentos.registrados.dlq`).
-
-    Recupérável por definição (é uma exceção comum no laço), então segue o
-    mesmo caminho de qualquer falha transitória: reentrega com backoff e, ao
-    esgotar, DLQ.
-    """
 
 
 class ConsumidorKafka:
@@ -641,16 +623,12 @@ escada de reentrega, o mesmo commit manual, a mesma DLQ) atender o
         suposição do worker sobre o fluxo. A diferença é observável: se alguém
         publicar um `PedidoCriado` em `pagamentos.registrados`, o `validar`
         devolve o `PedidoCriado` (um contrato válido) e o efeito nem é tentado —
-        o `_aplicar_efeito_pagamento` rejeita a combinação com `MensagemIncorreta`
+        o `_aplicar_efeito_pagamento` rejeita         a combinação com `MensagemIncorreta`
         e a mensagem vai para a DLQ **do fluxo de pagamento**. Silenciar isso
         (validar sempre contra o contrato do fluxo do worker) seria trocar uma
         falha visível por um efeito aplicado no lugar errado.
         """
-        try:
-            bruto = json.loads(corpo.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as erro:
-            raise ContratoInvalido(f"corpo não é JSON UTF-8 válido: {erro}") from erro
-        return validar(bruto)
+        return validar(desserializar_corpo(corpo))
 
     def _aplicar_efeito(
         self, evento: PedidoCriado | PagamentoRegistrado, tentativa: int
@@ -894,36 +872,36 @@ escada de reentrega, o mesmo commit manual, a mesma DLQ) atender o
         degraus = len(settings.PEDIDO_BACKOFF_SEGUNDOS)
         motivo = descrever(erro)
 
-        # `tentativa >= max_reentregas`: a escada acabou. Já `tentativa + 1 >
-        # degraus`: a política pede mais reentregas do que existem degraus
-        # configurados — sem tópico de retry para este degrau, a única rota
-        # honesta é a DLQ (e o log deixa isso explícito).
-        if tentativa >= max_reentregas:
-            # Terminal: última tentativa consumida. `tentativas` chega a
-            # `max_reentregas` no total, que é o número que a escada promete.
-            self._registrar_falha(evento, motivo, terminal=True)
-            self._mandar_para_dlq(mensagem, cabecalhos, corpo, tentativa, motivo=motivo)
-            return
-        if tentativa + 1 > degraus:
-            logger.error(
-                "política de reentrega inconsistente: faltam degraus de backoff",
-                extra={
-                    "evento": "PoliticaInconsistente",
-                    "resultado": "erro",
-                    "broker": "kafka",
-                    "pedido_id": evento.pedido_id,
-                    "tentativa": tentativa,
-                    "detalhe": (
-                        f"max_reentregas={max_reentregas} > "
-                        f"degraus configurados={degraus}"
-                    ),
-                },
-            )
+        destino = decidir_reentrega(
+            tentativa, max_reentregas=max_reentregas, degraus=degraus
+        )
+        if destino is not Destino.RETRY:
+            # `DLQ_ESGOTADA`: terminal, última tentativa consumida —
+            # `tentativas` chega a `max_reentregas` no total, que é o número
+            # que a escada promete. `DLQ_SEM_DEGRAU`: a política pede mais
+            # reentregas do que existem degraus configurados — sem tópico de
+            # retry para este degrau, a única rota honesta é a DLQ (e o log
+            # deixa isso explícito).
+            if destino is Destino.DLQ_SEM_DEGRAU:
+                logger.error(
+                    "política de reentrega inconsistente: faltam degraus de backoff",
+                    extra={
+                        "evento": "PoliticaInconsistente",
+                        "resultado": "erro",
+                        "broker": "kafka",
+                        "pedido_id": evento.pedido_id,
+                        "tentativa": tentativa,
+                        "detalhe": (
+                            f"max_reentregas={max_reentregas} > "
+                            f"degraus configurados={degraus}"
+                        ),
+                    },
+                )
             self._registrar_falha(evento, motivo, terminal=True)
             self._mandar_para_dlq(mensagem, cabecalhos, corpo, tentativa, motivo=motivo)
             return
 
-        degrau = tentativa + 1
+        degrau = degrau_de(tentativa)
         topico_retry = self.topologia.topico_retry(degrau)
         # A tentativa é gasta aqui, e não depois da republicação: a mensagem
         # foi processada com erro de qualquer jeito — se o `republicar` falhar,
@@ -1099,13 +1077,7 @@ def _erro_de_rebalance(erro: Exception) -> bool:
 def _tentativa(cabecalhos: list[tuple[str, str]]) -> int:
     """Contador de tentativas que viaja nos cabeçalhos da mensagem.
 
-    O `x-tentativa` é o NOSSO contador: sobrevive a qualquer coisa que o broker
-    faça com a mensagem e fica explícito no código. (No AMQP ele convivia com
-    o `x-death` do próprio RabbitMQ; no Kafka não existe equivalente de
-    broker, porque a retenção não "devolve" a mensagem — ela apaga.)
+    Delegado a `politica.tentativa_de`, a mesma fonte do consumidor AMQP — é o
+    que garante que os dois brokers não divergam na leitura do contador.
     """
-    dicionario = dict(cabecalhos)
-    try:
-        return int(dicionario.get(HEADER_TENTATIVA, 0))
-    except (TypeError, ValueError):
-        return 0
+    return tentativa_de(dict(cabecalhos))

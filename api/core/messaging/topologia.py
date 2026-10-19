@@ -75,13 +75,8 @@ EXCHANGE_DLQ = "pedidos.dlx"
 # Routing keys de retry: `retry.1`, `retry.2`, ... (exchange `direct`).
 PREFIXO_ROUTING_RETRY = "retry."
 
-# Headers AMQP usados pela política de reentrega.
-# `x-tentativa` é o NOSSO contador (sobrevive a qualquer coisa que o broker
-# faça com a mensagem); `x-death` é o contador do próprio RabbitMQ, que
-# registra cada vez que a mensagem passou por uma fila com TTL/dead-letter.
-HEADER_TENTATIVA = "x-tentativa"
-HEADER_EVENTO_ID = "x-evento-id"
-HEADER_MOTIVO = "x-motivo"
+# Headers AMQP da política de reentrega (`x-tentativa`, `x-death`) são
+# definidos em `politica.py`, fonte única compartilhada com o Kafka.
 
 
 def nomes_retry() -> list[tuple[int, str]]:

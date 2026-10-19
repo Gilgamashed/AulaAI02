@@ -36,10 +36,8 @@ from .. import models
 from . import contracts
 from .broker import PublicacaoFalhou
 from .erros import descrever
+from .politica import HEADER_EVENTO_ID, HEADER_MOTIVO, HEADER_TENTATIVA
 from .topologia import (
-    HEADER_EVENTO_ID,
-    HEADER_MOTIVO,
-    HEADER_TENTATIVA,
     Topologia,
     abrir_conexao,
     declarar_topologia,

@@ -33,7 +33,7 @@ import logging
 from core.messaging import broker as mensageria
 from core.messaging import kafka_produtor, kafka_topologia
 from core.messaging.erros import descrever
-from core.messaging.kafka_topologia import HEADER_MOTIVO, HEADER_TENTATIVA
+from core.messaging.politica import HEADER_MOTIVO, HEADER_TENTATIVA
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 

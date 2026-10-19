@@ -50,7 +50,6 @@ Notas metodológicas (importam para não ler número errado):
 
 import argparse
 import json
-import math
 import os
 import statistics
 import sys
@@ -58,6 +57,9 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from _medicao import cabecalhos as _headers
+from _medicao import percentil
 
 # Endpoints instrumentados com cache-aside na Aula 8. `{item}` é substituído
 # pelo id informado em --item-id.
@@ -74,14 +76,6 @@ METRICS_PATH = "/api/v1/cache/metrics/"
 # =====================================================================
 # Cliente HTTP mínimo (stdlib)
 # =====================================================================
-def _headers(token: str | None) -> dict[str, str]:
-    """Cabeçalhos comuns: JSON puro (nada de HTML da browsable API) + JWT."""
-    headers = {"Accept": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
-
-
 def request_once(url: str, token: str | None, timeout: float = 10.0):
     """Executa um GET e devolve `(status, latência_ms, tamanho_bytes)`.
 
@@ -101,19 +95,6 @@ def request_once(url: str, token: str | None, timeout: float = 10.0):
         status = erro.code
     latencia_ms = (time.perf_counter() - inicio) * 1000
     return status, latencia_ms, len(corpo)
-
-
-def percentil(amostras: list[float], p: float) -> float:
-    """Percentil pelo método do rank mais próximo (p95 = 95% abaixo dele).
-
-    Não usamos `statistics.quantiles` porque ela interpola e exige n>=2;
-    com poucas amostras o rank mais próximo é mais honesto.
-    """
-    if not amostras:
-        return 0.0
-    ordenadas = sorted(amostras)
-    posicao = max(1, math.ceil(p / 100 * len(ordenadas)))
-    return ordenadas[posicao - 1]
 
 
 def medir_endpoint(url: str, requisicoes: int, token: str | None, aquecimento: int):

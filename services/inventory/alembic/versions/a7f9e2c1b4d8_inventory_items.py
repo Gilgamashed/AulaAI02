@@ -9,16 +9,17 @@ Espelha fielmente o modelo `InventoryItem` (models.py): PK BigInteger, índice
 não-negativas. O downgrade remove o índice e a tabela de forma reversível.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
+
+import sqlalchemy as sa
 
 from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "a7f9e2c1b4d8"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -50,7 +51,9 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("quantity >= 0", name="ck_inventory_items_quantity_non_negative"),
         sa.CheckConstraint("reserved >= 0", name="ck_inventory_items_reserved_non_negative"),
-        sa.CheckConstraint("reorder_level >= 0", name="ck_inventory_items_reorder_level_non_negative"),
+        sa.CheckConstraint(
+            "reorder_level >= 0", name="ck_inventory_items_reorder_level_non_negative"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     # Índice essencial: único (integridade) e usado nos lookups por SKU.
