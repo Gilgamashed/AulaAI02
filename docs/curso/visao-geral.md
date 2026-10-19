@@ -1,4 +1,10 @@
 # SynapseShop — Visão Geral do Projeto & Arquitetura-Alvo
+
+> **Material do curso.** Este documento descreve o escopo completo das 25 aulas,
+> incluindo funcionalidades ainda não implementadas (`/ask_sql`, `/ask_docs`,
+> dashboards, CI/CD). Para o estado atual do produto, comece pelo
+> [`README.md`](../../README.md).
+
 **Curso de Programação Python Avançada com IA** · 100 horas · 25 aulas  
 **Empresa Simulada:** SynapseTech  
 

@@ -5,6 +5,51 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.14.1] - 2026-10-19 — Manutenção de otimização
+
+> Passo de otimização do repositório: eliminação de duplicações entre os dois
+> brokers, correções factuais e reorganização da documentação. Nenhum
+> comportamento de runtime muda.
+
+### Adicionado
+
+- **Base comum de mensageria (`api/core/messaging/politica.py`,
+  `excecoes.py`):** cabeçalhos de reentrega (`x-tentativa`, `x-evento-id`,
+  `x-motivo`), leitura do contador, decisão da escada (`Destino`) e
+  desserialização de corpo agora têm fonte única, compartilhada pelos
+  consumidores AMQP (Aula 9) e Kafka (Aulas 10-11) — antes cada broker
+  reimplementava o mecanismo. `MensagemIncorreta`/`FalhaInjetada` saem dos
+  consumidores para `messaging.excecoes`, eliminando as duas definições
+  paralelas em que um `except` do AMQP não capturava a exceção do Kafka.
+- **`api/core/erros.py`:** implementação única de `descrever`; os caminhos
+  `core.messaging.erros.descrever` e `core.llm.erros.descrever` passam a
+  re-exportar (antes eram duas cópias idênticas).
+- **`scripts/_medicao.py`:** `percentil` e `cabecalhos` compartilhados pelos
+  scripts `measure_cache.py` e `measure_messaging.py` (antes, cópias).
+
+### Corrigido
+
+- **OpenAPI `1.14.0` → `1.14.1`:** o path do assistente era documentado como
+  `/api/v1/assist` (sem barra final); a rota real — e a única testada — é
+  `/api/v1/assist/`, como o resto das rotas Django do contrato.
+- **`docker-compose.yml`:** o serviço de pagamentos interpolava
+  `MESSAGERIA_LOG_LEVEL` enquanto código, `.env.example` e os demais
+  serviços usam `MESSAGING_LOG_LEVEL` — na prática a variável era ignorada
+  e o nível do logger sempre caía no default `INFO`.
+
+### Mudado
+
+- **Documentação:** o README (108 KB) virou um hub de ~11 KB; o conteúdo
+  por aula foi para `docs/aulas/`, `docs/testes.md` e `docs/integrador.md`,
+  e a Aula 7 foi fundida em `docs/autenticacao.md`. `PROMPTS_STUDY.md` foi
+  para `docs/estudo/`.
+- **Skills:** as 7 skills soltas de `.opencode/skills/` viraram 3 skills no
+  formato `SKILL.md` (`arquitetura-e-squad`, `engenharia-devops`,
+  `especialista-ia`); `AGENTS.md` na raiz guia os agentes.
+- **Limpeza:** fixture órfã `relogio_fixo` e a dependência `freezegun`
+  (não usada), stubs de spec, `.gitkeep`s, `node_modules` do `.opencode`,
+  import morto `LlmResposta`, `SIMPLE_JWT` redundante nos test settings.
+
 ## [1.14.0] - 2026-10-09 — Aula 14
 
 > Camada de IA do SynapseShop: assistente de logs com resiliência, privacidade

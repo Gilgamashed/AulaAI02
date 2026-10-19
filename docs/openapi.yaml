@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: SynapseShop API
-  version: 1.14.0
+  version: 1.14.1
   description: |
     Documentação OpenAPI do MVP SynapseShop (Aula 14).
 
     Contrato da API principal (`api/` — Django REST Framework) e do
     microsserviço complementar de estoque (`services/inventory/` — FastAPI).
 
-    A Aula 14 adicionou o assistente de IA (`POST /api/v1/assist`) e a
+    A Aula 14 adicionou o assistente de IA (`POST /api/v1/assist/`) e a
     telemetria do provedor (`GET /api/v1/llm/metrics/`).
 
     ## Convenções de contrato
@@ -973,7 +973,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  /api/v1/assist:
+  /api/v1/assist/:
     post:
       operationId: assistLogs
       summary: Sumariza ou explica logs operacionais via IA (Aula 14)
@@ -2089,7 +2089,7 @@ components:
     AssistRequest:
       type: object
       description: |
-        Entrada do `POST /api/v1/assist`. `logs` aceita uma string OU um array
+        Entrada do `POST /api/v1/assist/`. `logs` aceita uma string OU um array
         de strings (normalizado para lista); nenhum valor é interpretado — o
         conteúdo vai direto ao prompt (após a redação de PII).
       properties:

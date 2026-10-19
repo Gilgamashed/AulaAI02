@@ -25,6 +25,7 @@ de senha e criação de usuário fora do seed).
 9. [Django Admin em `/admin/`](#9-django-admin-em-admin)
 10. [Troubleshooting](#10-troubleshooting)
 11. [Checklist rápido de validação](#11-checklist-rápido-de-validação)
+12. [Detalhes técnicos (Aula 7)](#detalhes-técnicos-aula-7)
 
 ---
 
@@ -638,6 +639,117 @@ Matriz de status esperada:
 
 ---
 
+---
+
+## Detalhes técnicos (Aula 7)
+
+> Extraído do registro da Aula 7 no README.
+Adiciona a camada de acesso seguro à API do Django. **Decisão:** reutilizar o
+`django.contrib.auth` (User/Groups já existentes) sem customizar
+`AUTH_USER_MODEL` (alinhado à Aula 6); o JWT entra via
+`djangorestframework-simplejwt` e os filtros via `django-filter`.
+
+### Papéis (roles) e usuários demo
+
+Os papéis **admin** e **user** são `Group`s do Django. O comando `seed_auth`
+cria os grupos e dois usuários demo (idempotente; senhas sobrescritas apenas
+no primeiro import):
+
+```bash
+docker compose exec api python api/manage.py seed_auth
+```
+
+| Usuário      | Papel  | Senha (DEV)           | Observação                      |
+| ------------ | ------ | --------------------- | ------------------------------- |
+| `demo_admin` | admin  | `demo-admin@Synapse2026` | `staff` (acessa o Django Admin) |
+| `demo_user`  | user   | `demo-user@Synapse2026` | acesso comum à API             |
+
+> Senhas podem ser definidas via `.env` (`SEED_ADMIN_PASSWORD`,
+> `SEED_USER_PASSWORD`). As credenciais acima são **somente** para ambiente de
+> desenvolvimento.
+
+### Rotas de autenticação (JWT)
+
+| Rota                                | Método | Descrição                                  | Throttle  |
+| ----------------------------------- | ------ | ------------------------------------------ | --------- |
+| `/api/v1/auth/token/`               | POST   | Login → `{access, refresh}`                | `login` (5/min) |
+| `/api/v1/auth/token/refresh/`       | POST   | Troca `refresh` por novo `access`          | `login` (5/min) |
+| `/api/v1/auth/token/verify/`        | POST   | Valida um access token                     | —         |
+
+Tokens: `access` expira em **5 min**, `refresh` em **1 dia** (SimpleJWT). A
+assinatura usa `JWT_SIGNING_KEY` (ou o `DJANGO_SECRET_KEY` como fallback).
+
+### Matriz de permissões
+
+| Verbo          | Público | user        | admin |
+| -------------- | ------- | ----------- | ----- |
+| GET list/detail (`/categories/`, `/items/`) | ✅ 200 | ✅ 200 | ✅ 200 |
+| POST           | ❌ 401  | ✅ 201      | ✅ 201 |
+| PUT/PATCH/DELETE | ❌ 401 | ❌ 403      | ✅ 200/204 |
+
+Implementada com `get_permissions()` em cada viewset; a permissão
+`IsAdminRole` (`api/core/permissions.py`) testa o grupo `admin`/superuser.
+Anônimo escrevendo → **401**; user em rota administrativa → **403**.
+
+### Throttling e segurança mínima
+
+| Taxa      | Aplica-se a                            |
+| --------- | -------------------------------------- |
+| `anon` 20/min | requisições não autenticadas |
+| `user` 100/min | usuários autenticados        |
+| `login` 5/min  | `/auth/token/` e `/auth/token/refresh/` (anti força bruta) |
+
+Configurada em `settings.py` (`DEFAULT_THROTTLE_*`) + `ScopedRateThrottle`
+nas views de token. **Segurança mínima:** autenticação JWT exigida nas
+escritas, `SECURITY_MIDDLEWARE` ativo e segredos via `.env`.
+
+### Paginação e filtros
+
+- **Paginação:** `PageNumberPagination` global (`PAGE_SIZE=20`) → respostas
+  `{count, next, previous, results}` (validação de página inexistente → 404).
+- **Filtros de domínio** (`ItemFilter` em `api/core/filters.py`):
+  `?category=<id>`, `?is_active=true`, `?min_price=`, `?max_price=`.
+  `category` usa `NumberFilter` sobre `category_id`: id inexistente → 200
+  com lista vazia (evita 400 para catálogo público).
+- **Busca livre:** `?search=iphone` (name/brand/model/sku em Item; name/slug
+  em Category).
+- **Ordenação:** `?ordering=-price`, `-created_at`, etc.
+
+### Segredos no `.env`
+
+`.env` é gitignored **(nunca versionado)**; `settings.py` e o compose leem:
+`DJANGO_SECRET_KEY`, `JWT_SIGNING_KEY` e `DJANGO_DEBUG` (o `.env.example`
+documenta os placeholders). Gere valores fortes com:
+
+```powershell
+python -c "from django.utils.crypto import get_random_string; print(get_random_string(50))"
+```
+
+### Matriz de status validada (ambiente conteinerizado)
+
+| Cenário                              | Status |
+| ------------------------------------ | ------ |
+| Healthcheck                          | 200    |
+| Login admin / user (credenciais corretas) | 200 |
+| Login com credencial errada          | 401    |
+| Refresh / verify                     | 200    |
+| GET list/detail sem token            | 200    |
+| POST sem token (categorias e itens)  | 401    |
+| POST com user / admin                | 201    |
+| POST inválido (preço negativo)       | 400    |
+| PUT/PATCH/DELETE com user            | 403    |
+| PUT/PATCH com admin                  | 200    |
+| DELETE com admin                     | 204    |
+| Burst de login (>5/min)              | 429    |
+| Página de listagem inexistente       | 404    |
+
+Coleção exportada para teste:
+`collections/synapseshop_aula7.postman_collection.json` (variáveis
+`base_url`, `token_admin`, `token_user` e `refresh_admin` — os logins
+preenchem os tokens automaticamente).
+
+
+
 ## Referências
 
 - Código: `api/core/urls.py` (rotas de token),
@@ -645,4 +757,4 @@ Matriz de status esperada:
   `api/core/management/commands/seed_auth.py` (papéis e usuários demo),
   `api/config/settings.py` (`REST_FRAMEWORK`, `SIMPLE_JWT`, throttles).
 - Collection Postman: `collections/synapseshop_aula7.postman_collection.json`.
-- Visão geral do projeto: [README.md](README.md).
+- Visão geral do projeto: [README.md](../README.md).
