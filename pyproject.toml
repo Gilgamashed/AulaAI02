@@ -34,7 +34,7 @@ DJANGO_SETTINGS_MODULE = "config.settings_test"
 # código esperam). `services/inventory` torna `app.*` importável, o
 # namespace do microsserviço de estoque — que usa o nome genérico `app` e
 # por isso precisa do caminho na frente dos testes de importarem o pacote.
-pythonpath = ["api", "services/inventory"]
+pythonpath = ["api", "services/inventory", "."]
 
 testpaths = ["tests"]
 
@@ -54,6 +54,7 @@ addopts = [
     "--strict-config",
     "--cov=api/core",
     "--cov=services/inventory/app",
+    "--cov=dashboard",
     "--cov-branch",
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
@@ -97,8 +98,10 @@ omit = [
     "*/admin.py",
     # `apps.py` só declara o AppConfig do Django (nome e auto_field).
     "*/apps.py",
+    # Painel Streamlit (UI) — não medimos cobertura da interface
+    "*/dashboard/app.py",
     # Infra de mensageria (`api/core/messaging/*`): só roda em worker/CLI
-    # (`consumir_pedidos`, `republicar_pedidos`, `declarar_topicos_kafka`) —
+    # (`consumir_pedidos`, `republicar_pedidos`, `declarar_topicos_kafka`) —"
     # o pytest nunca os exercita, e a suíte deliberadamente não toca broker
     # real (ver `tests/conftest.py`, `broker_capturado`). Medir aqui exigiria
     # reescrever o comportamento dos workers; o que as views consomem

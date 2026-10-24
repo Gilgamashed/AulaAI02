@@ -27,6 +27,7 @@ spec; a implementação deve satisfazer apenas a spec da aula corrente (ver
 | 13 | [Documentação Completa da API com OpenAPI/Swagger e Postman](specs_da_aula_13.md) |
 | 14 | [Assistente de IA e llm_service](specs_da_aula_14.md) |
 | 15–16 | Sem spec própria — continuação do trabalho das aulas anteriores |
+| 19 | [Conexão Segura, SQL Injection e Painel Streamlit](spec_da_aula_19.md) |
 
 ## Relacionados
 

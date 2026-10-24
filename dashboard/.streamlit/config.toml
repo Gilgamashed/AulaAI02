@@ -1,0 +1,9 @@
+[server]
+runOnSave = true
+fileWatcherType = "poll"
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false

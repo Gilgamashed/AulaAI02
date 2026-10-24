@@ -61,14 +61,46 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # Banco fornecido pelo serviço `db` do docker-compose via DATABASE_URL.
+# Aula 19: suporte opcional a configuração segura via variáveis DB_* com
+# SSL/TLS (DB_SSLMODE), pooling e timeouts.
+_db_url = os.environ.get("DATABASE_URL") or None
+if not _db_url and os.environ.get("DB_HOST"):
+    from urllib.parse import quote_plus
+
+    _db_host = os.environ["DB_HOST"]
+    _db_port = os.environ.get("DB_PORT", "5432")
+    _db_name = os.environ["DB_NAME"]
+    _db_user = os.environ["DB_USER"]
+    _db_pass = os.environ["DB_PASSWORD"]
+    _db_sslmode = os.environ.get("DB_SSLMODE", "require")
+    if _db_sslmode not in {"require", "verify-ca", "verify-full", "disable", "allow", "prefer"}:
+        _db_sslmode = "require"
+    _db_url = f"postgresql://{quote_plus(_db_user)}:{quote_plus(_db_pass)}@{_db_host}:{_db_port}/{_db_name}?sslmode={_db_sslmode}"
+
 DATABASES = {
     "default": dj_database_url.config(
-        default=os.environ.get(
+        default=_db_url
+        or os.environ.get(
             "DATABASE_URL",
             "postgresql://synapse:synapse@localhost:5432/synapse",
         )
     )
 }
+
+# Timeouts/conexão seguros quando aplicável
+if os.environ.get("DB_SSLMODE") or os.environ.get("DB_CONNECT_TIMEOUT") or os.environ.get("DB_STATEMENT_TIMEOUT_MS"):
+    _connect_timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "10"))
+    _statement_timeout_ms = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
+    DATABASES["default"].setdefault("OPTIONS", {})
+    _sslmode_atual = DATABASES["default"]["OPTIONS"].get("sslmode") or os.environ.get("DB_SSLMODE")
+    if _sslmode_atual and _sslmode_atual not in {"disable", "allow"}:
+        DATABASES["default"]["OPTIONS"]["sslmode"] = _sslmode_atual
+    elif os.environ.get("DB_SSLMODE") and os.environ.get("DB_SSLMODE") not in {"disable", "allow"}:
+        DATABASES["default"]["OPTIONS"]["sslmode"] = os.environ.get("DB_SSLMODE")
+    if "connect_timeout" not in DATABASES["default"]["OPTIONS"]:
+        DATABASES["default"]["OPTIONS"]["connect_timeout"] = _connect_timeout
+    if "options" not in DATABASES["default"]["OPTIONS"]:
+        DATABASES["default"]["OPTIONS"]["options"] = f"-c statement_timeout={_statement_timeout_ms}"
 
 AUTH_PASSWORD_VALIDATORS = [
     {

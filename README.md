@@ -74,6 +74,7 @@ Aula 11). São **sete serviços**:
 | `inventory`  | build de `services/inventory/Dockerfile` | Microsserviço FastAPI de estoque: `/health`, `/docs` e CRUD em `/api/v1/inventory` (porta 8001); persistência própria no PostgreSQL governada pelo Alembic (Aula 6) |
 | `worker-kafka` | mesma imagem da `api` | Consumidor do fluxo de **pedidos** (`pedidos.criados`, grupo `synapseshop-pedidos`) |
 | `worker-pagamentos` | mesma imagem da `api` | Consumidor do fluxo de **pagamentos** (`pagamentos.registrados`, grupo `synapseshop-pagamentos`) |
+| `dashboard` | build de `dashboard/Dockerfile` | Painel Streamlit com conexão segura, SQLi mitigado, filtros e cache (porta 8501) |
 
 Existe ainda um serviço `rabbitmq`, mas ele está atrás do profile `rabbitmq`
 (Aulas 9/10) e **não sobe** no caminho Kafka — que é o broker padrão da Aula 11.
@@ -97,6 +98,12 @@ consumir antes das tabelas existirem.
 
 ```bash
 docker compose up -d --build
+```
+
+Painel Streamlit: [http://localhost:8501](http://localhost:8501). Simulação de SQL Injection:
+
+```bash
+docker compose run --rm dashboard python -m dashboard.simular_sqli
 ```
 
 Não é preciso declarar os tópicos Kafka na mão: o broker sobe com
@@ -225,6 +232,44 @@ mantém o estado atual do projeto e o índice para navegação.
 - [Specs por aula (SpecDD)](specs/README.md)
 - [Visão geral do curso](docs/curso/visao-geral.md)
 - [PROMPTS.md](PROMPTS.md) — histórico de uso de IA (entrega obrigatória)
+
+## Conexão Segura, SQL Injection e Painel Streamlit (Aula 19)
+
+### Variáveis de ambiente
+Configurar no `.env`:
+
+```env
+DB_HOST=db
+DB_PORT=5432
+DB_NAME=synapse
+DB_USER=synapse
+DB_PASSWORD=synapse
+DB_SSLMODE=require
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=20
+DB_POOL_TIMEOUT=30
+DB_POOL_RECYCLE=1800
+DB_CONNECT_TIMEOUT=10
+DB_STATEMENT_TIMEOUT_MS=30000
+```
+
+### Segurança da conexão
+- **SSL/TLS obrigatório:** `DB_SSLMODE=require` com certificado TLS no PostgreSQL.
+- **Pooling:** configurado via SQLAlchemy (`pool_size`, `max_overflow`, `pool_timeout`, `pool_recycle`), `pool_pre_ping` habilitado.
+- **Timeouts:** `connect_timeout` e `statement_timeout` aplicados.
+- **Credenciais via ambiente:** nunca hardcoded.
+
+### Prevenção a SQL Injection (Zero Interpolação)
+- **Obrigatório:** usar *bind parameters* (SQLAlchemy Core/`text` com parâmetros). Vedada interpolação direta de strings em SQL.
+- **Ordenação dinâmica segura:** *allow-list* (`dashboard/security.py`) para `ORDER BY`.
+- **Filtros robustos:** cláusulas parametrizadas com filtros por data/status/ID.
+- **Módulos:** `dashboard/db.py`, `dashboard/queries.py`, `dashboard/security.py`, `dashboard/simular_sqli.py`. Simulação: `python -m dashboard.simular_sqli`.
+
+### Painel Streamlit
+- **Serviço:** `dashboard` (porta `8501`), com *bind-mount* para *live reload* (`runOnSave=true`).
+- **Funcionalidades:** filtros dinâmicos (data, status, ID), ordenação segura, tabela (`st.dataframe`), gráfico (`st.bar_chart`), métricas.
+- **Cache:** `@st.cache_data(ttl=60)`.
+- **Documentação:** [docs/aulas/19-dashboard.md](docs/aulas/19-dashboard.md).
 
 ## Referências
 

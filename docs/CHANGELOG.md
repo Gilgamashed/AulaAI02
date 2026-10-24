@@ -5,6 +5,21 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.19.0] - 2026-10-23 — Conexão Segura, SQL Injection e Painel Streamlit
+
+### Adicionado
+
+- **Conexão segura (Aula 19):** `dashboard/db.py` com montagem de URL via variáveis `DB_*`, engine SQLAlchemy com *pooling*, `pool_pre_ping`, *timeouts* (`connect_timeout`/`statement_timeout`) e `DB_SSLMODE=require`. PostgreSQL com TLS via imagem `docker/postgres/`.
+- **Mitigação de SQL Injection:** `dashboard/queries.py` com SQLAlchemy Core e *bind parameters*; `dashboard/security.py` com allow-list para `ORDER BY`; simulação controlada em `dashboard/simular_sqli.py`.
+- **Painel Streamlit:** `dashboard/app.py` com filtros dinâmicos (data, status, ID), ordenação segura, tabela, gráfico de barras, métricas e `@st.cache_data(ttl=60)`. *Live reload* com bind-mount e `runOnSave`.
+- **Infraestrutura:** serviço `dashboard` no `docker-compose.yml`, Dockerfile e `.streamlit/config.toml`. `api`/`inventory`/`workers`/`tests` usam conexão com `sslmode=require` e variáveis `DB_*`.
+- **Testes:** `tests/unit/test_dashboard_db.py`, `tests/unit/test_dashboard_queries.py`, `tests/unit/test_dashboard_sqli.py`, `tests/unit/test_inventory_database_aula19.py`.
+
+### Alterado
+
+- **README.md:** adicionada seção da Aula 19, serviço `dashboard` na tabela e URL do painel.
+- **docs/aulas/19-dashboard.md:** documentação técnica da Aula 19.
+
 ## [1.14.1] - 2026-10-19 — Manutenção de otimização
 
 > Passo de otimização do repositório: eliminação de duplicações entre os dois

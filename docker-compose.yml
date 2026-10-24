@@ -28,7 +28,19 @@ services:
       # "container que não sobe".
     environment:
       # Variável mínima injetada: a API localiza o banco pelo nome do serviço 'db'
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=require
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-synapse}
+      DB_USER: ${POSTGRES_USER:-synapse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-synapse}
+      DB_SSLMODE: require
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-1800}
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-10}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-30000}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-synapseshop-key}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
       # Aula 7: chave de assinatura do JWT injetada do .env via compose.
@@ -127,7 +139,7 @@ services:
       start_period: 5s
 
   db:
-    image: postgres:16-alpine
+    build: ./docker/postgres
     container_name: synapseshop_db
     restart: unless-stopped
     # Porta publicada para permitir comandos de gerenciamento local (venv):
@@ -178,7 +190,19 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=require
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-synapse}
+      DB_USER: ${POSTGRES_USER:-synapse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-synapse}
+      DB_SSLMODE: require
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-1800}
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-10}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-30000}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 10s
@@ -262,7 +286,13 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-synapse}:${POSTGRES_PASSWORD:-synapse}@db:5432/${POSTGRES_DB:-synapse}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-synapse}:${POSTGRES_PASSWORD:-synapse}@db:5432/${POSTGRES_DB:-synapse}?sslmode=require
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-synapse}
+      DB_USER: ${POSTGRES_USER:-synapse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-synapse}
+      DB_SSLMODE: require
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-synapseshop-key}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
       # Aula 10: Kafka (padrão). `KAFKA_BOOTSTRAP_SERVERS` não é lido do `.env`
@@ -310,7 +340,13 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-synapse}:${POSTGRES_PASSWORD:-synapse}@db:5432/${POSTGRES_DB:-synapse}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-synapse}:${POSTGRES_PASSWORD:-synapse}@db:5432/${POSTGRES_DB:-synapse}?sslmode=require
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-synapse}
+      DB_USER: ${POSTGRES_USER:-synapse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-synapse}
+      DB_SSLMODE: require
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-synapseshop-key}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
       MENSAGERIA_BROKER: kafka
@@ -446,7 +482,13 @@ services:
     environment:
       # As mesmas variáveis do serviço `api`: o import de `config.settings`
       # (herdado pelo settings_test) lê URLs e chaves do ambiente.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-synapse}:${POSTGRES_PASSWORD:-synapse}@db:5432/${POSTGRES_DB:-synapse}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-synapse}:${POSTGRES_PASSWORD:-synapse}@db:5432/${POSTGRES_DB:-synapse}?sslmode=require
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-synapse}
+      DB_USER: ${POSTGRES_USER:-synapse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-synapse}
+      DB_SSLMODE: require
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-synapseshop-key}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
@@ -462,6 +504,39 @@ services:
     # vem do host.
     volumes:
       - .:/app
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    container_name: synapseshop_dashboard
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-synapse}
+      DB_USER: ${POSTGRES_USER:-synapse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-synapse}
+      DB_SSLMODE: require
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-1800}
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-10}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-30000}
+    volumes:
+      - ./dashboard:/app/dashboard
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   pgdata:

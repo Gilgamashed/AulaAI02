@@ -19,11 +19,12 @@ infraestrutura de aulas futuras. A meta-spec completa está em
 ## Comandos
 
 ```bash
-docker compose up -d --build          # ambiente completo (api :8000, inventory :8001)
+docker compose up -d --build          # ambiente completo (api :8000, inventory :8001, dashboard :8501)
 docker compose run --rm tests         # suíte pytest com gate de cobertura (85%)
 docker compose exec api python api/manage.py seed_auth   # usuários demo
+docker compose run --rm dashboard python -m dashboard.simular_sqli  # simulação SQLi
 python -m ruff check .                # lint
-python -m mypy api services           # verificação de tipos
+python -m mypy api services dashboard # verificação de tipos
 python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 ```
 
@@ -31,6 +32,7 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 
 - `api/` — Django (app `core`, mensageria, LLM, commands, migrations)
 - `services/inventory/` — FastAPI + SQLAlchemy/Alembic
+- `dashboard/` — Streamlit (conexão segura, consultas parametrizadas, painel analítico)
 - `tests/` — `unit/` e `integration/` (pytest + pytest-django)
 - `specs/` — specs incrementais por aula (fonte de requisitos)
 - `docs/` — autenticação, contratos de evento, OpenAPI, changelog, aulas
