@@ -392,3 +392,48 @@ class Notificacao(models.Model):
 
     def __str__(self):
         return f"Notificação {self.pk} do pedido {self.pedido_id} ({self.canal})"
+
+
+# =====================================================================
+# Aula 20 — Métricas de requisição (dashboard de desempenho)
+# =====================================================================
+class RequisicaoMetrica(models.Model):
+    """Uma linha por requisição HTTP instrumentada.
+
+    O middleware `core.observability.RegistrarMetricasMiddleware` grava a
+    latência e os contadores de cache **daquela requisição**. Os três campos
+    de cache vêm do coletor em memória (`core.cache_metrics`), lido em uma
+    janela delimitada pelo próprio middleware; assim a hit rate exibida no
+    dashboard é a real, e não uma estimativa derivada da latência.
+
+    A tabela é um log operacional: cresce a cada requisição e é podada pelo
+    comando `manage.py limpar_metricas`.
+    """
+
+    metodo = models.CharField(max_length=10)
+    endpoint = models.CharField(max_length=200, db_index=True)
+    status_code = models.PositiveSmallIntegerField(db_index=True)
+    latencia_ms = models.FloatField()
+    cache_hits = models.PositiveIntegerField(default=0)
+    cache_misses = models.PositiveIntegerField(default=0)
+    cache_bypasses = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        db_table = "core_requisicao_metrica"
+        verbose_name = "métrica de requisição"
+        verbose_name_plural = "métricas de requisição"
+        indexes = [
+            models.Index(
+                fields=["created_at", "endpoint"],
+                name="core_requis_created_ep_idx",
+            ),
+            models.Index(
+                fields=["created_at", "status_code"],
+                name="core_requis_created_st_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.metodo} {self.endpoint} {self.status_code} {self.latencia_ms:.2f}ms"

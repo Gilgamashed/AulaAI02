@@ -17,6 +17,13 @@ distintos — a distinção é o que dá utilidade operacional à métrica:
 processo*. Com o gunicorn padrão (1 worker) a leitura é exata; se a API for
 escalada para vários workers, cada processo conta a sua parte e o agregado é
 a soma — aceitável para uma taxa de acerto agregada.
+
+**Aula 20:** além do agregado por processo, o coletor mantém uma janela
+*por thread* (`iniciar_requisicao`/`finalizar_requisicao`). O middleware de
+métricas abre a janela antes da view e recolhe os deltas no fim, gravando
+`cache_hits`/`cache_misses`/`cache_bypasses` na linha da requisição. É isso
+que permite ao dashboard exibir a hit rate real sem chamar o endpoint
+administrativo `/api/v1/cache/metrics/`.
 """
 
 import threading
@@ -69,15 +76,56 @@ class CacheMetrics:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._namespaces: dict[str, NamespaceMetrics] = {}
+        # Contadores da requisição em curso nesta thread. O middleware da
+        # Aula 20 abre e fecha a janela; a atribuição é por thread porque o
+        # gunicorn atende requisições concorrentes em threads.
+        self._local = threading.local()
 
     def _namespace(self, namespace: str) -> NamespaceMetrics:
         # Chamado já sob o lock.
         return self._namespaces.setdefault(namespace, NamespaceMetrics())
 
+    def iniciar_requisicao(self) -> None:
+        """Zera a janela da thread antes de a view executar."""
+        self._local.ativo = True
+        self._local.hits = 0
+        self._local.misses = 0
+        self._local.bypasses = 0
+
+    def finalizar_requisicao(self) -> dict[str, int]:
+        """Fecha a janela e devolve os contadores acumulados na requisição.
+
+        Chamar sem uma janela aberta devolve zeros em vez de falhar: o
+        middleware pode ser desligado por `API_METRICS_ENABLED`, e nesse caso
+        ninguém abre a janela.
+        """
+        if not getattr(self._local, "ativo", False):
+            return {"hits": 0, "misses": 0, "bypasses": 0}
+        resultado = {
+            "hits": self._local.hits,
+            "misses": self._local.misses,
+            "bypasses": self._local.bypasses,
+        }
+        self._local.ativo = False
+        return resultado
+
+    def _contar_na_requisicao(self, resultado: str) -> None:
+        # Sem janela aberta (CLI, testes unitários, worker) não há a quem
+        # atribuir o evento; o contador global continua sendo atualizado.
+        if not getattr(self._local, "ativo", False):
+            return
+        if resultado == HIT:
+            self._local.hits += 1
+        elif resultado == MISS:
+            self._local.misses += 1
+        elif resultado == BYPASS:
+            self._local.bypasses += 1
+
     def record(self, namespace: str, resultado: str) -> None:
         """Registra o desfecho de uma consulta ao cache em um namespace."""
         with self._lock:
             contadores = self._namespace(namespace)
+            self._contar_na_requisicao(resultado)
             if resultado == BYPASS:
                 contadores.bypasses += 1
                 return
@@ -117,6 +165,10 @@ class CacheMetrics:
         """Zera todos os contadores (usado em demonstrações de aula)."""
         with self._lock:
             self._namespaces.clear()
+            self._local.ativo = False
+            self._local.hits = 0
+            self._local.misses = 0
+            self._local.bypasses = 0
 
 
 # Instância única do processo: é ela que `core/cache.py` alimenta e que a

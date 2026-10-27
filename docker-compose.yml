@@ -131,6 +131,7 @@ services:
       LLM_REDACAO_ATIVA: ${LLM_REDACAO_ATIVA:-true}
       LLM_CUSTO_INPUT_POR_1M_TOKENS: ${LLM_CUSTO_INPUT_POR_1M_TOKENS:-5.00}
       LLM_CUSTO_OUTPUT_POR_1M_TOKENS: ${LLM_CUSTO_OUTPUT_POR_1M_TOKENS:-15.00}
+      API_METRICS_ENABLED: ${API_METRICS_ENABLED:-true}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -513,6 +514,8 @@ services:
     restart: unless-stopped
     depends_on:
       db:
+        condition: service_healthy
+      api:
         condition: service_healthy
     ports:
       - "8501:8501"

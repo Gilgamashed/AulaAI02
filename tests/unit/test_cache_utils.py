@@ -287,3 +287,38 @@ def test_falha_de_leitura_do_cache_cai_para_o_banco(monkeypatch):
     assert cache_aside("item:1", 60, "item", lambda: {"do_banco": True}) == {
         "do_banco": True
     }
+
+
+# =====================================================================
+# Janela por requisição (Aula 20)
+# =====================================================================
+def test_janela_de_requisicao_conta_hits_misses_e_bypass():
+    """O middleware da Aula 20 lê exatamente o que aconteceu na requisição.
+
+    Um HIT e um MISS da mesma chave provam que o delta é por operação; o
+    bypass com chave `None` entra na terceira coluna e **não** no
+    denominador da hit rate.
+    """
+    cache_metrics.iniciar_requisicao()
+    cache_aside("item:janela", 60, "item", lambda: {"origem": "banco"})  # miss
+    cache_aside("item:janela", 60, "item", lambda: {"origem": "banco"})  # hit
+    cache_aside(None, 60, "item", lambda: {"origem": "banco"})  # bypass
+
+    assert cache_metrics.finalizar_requisicao() == {
+        "hits": 1,
+        "misses": 1,
+        "bypasses": 1,
+    }
+
+
+def test_fora_da_janela_nao_atribui_contadores_a_requisicao():
+    """CLI e worker usam o coletor sem middleware; não há janela aberta."""
+    cache_aside("item:fora", 60, "item", lambda: {"origem": "banco"})
+
+    assert cache_metrics.finalizar_requisicao() == {
+        "hits": 0,
+        "misses": 0,
+        "bypasses": 0,
+    }
+    # O agregado global continua sendo alimentado normalmente.
+    assert cache_metrics.snapshot()["item"].misses == 1

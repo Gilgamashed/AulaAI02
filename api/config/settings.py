@@ -38,7 +38,16 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "core.observability.RegistrarMetricasMiddleware",
 ]
+
+# Aula 20 - Dashboard de Desempenho
+API_METRICS_ENABLED = os.environ.get("API_METRICS_ENABLED", "true").strip().lower() not in {
+    "false",
+    "0",
+    "no",
+    "off",
+}
 
 ROOT_URLCONF = "config.urls"
 
