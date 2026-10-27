@@ -63,7 +63,7 @@ Docker, Django REST Framework, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis.
 ## Como subir o ambiente
 
 Infraestrutura conteinerizada com Docker Compose (Aula 2/3, estendida até a
-Aula 11). São **sete serviços**:
+Aula 20). São **oito serviços**:
 
 | Serviço      | Imagem             | Função                                               |
 | ------------ | ------------------ | ---------------------------------------------------- |
@@ -74,7 +74,7 @@ Aula 11). São **sete serviços**:
 | `inventory`  | build de `services/inventory/Dockerfile` | Microsserviço FastAPI de estoque: `/health`, `/docs` e CRUD em `/api/v1/inventory` (porta 8001); persistência própria no PostgreSQL governada pelo Alembic (Aula 6) |
 | `worker-kafka` | mesma imagem da `api` | Consumidor do fluxo de **pedidos** (`pedidos.criados`, grupo `synapseshop-pedidos`) |
 | `worker-pagamentos` | mesma imagem da `api` | Consumidor do fluxo de **pagamentos** (`pagamentos.registrados`, grupo `synapseshop-pagamentos`) |
-| `dashboard` | build de `dashboard/Dockerfile` | Painel Streamlit com conexão segura, SQLi mitigado, filtros e cache (porta 8501) |
+| `dashboard` | build de `dashboard/Dockerfile` | Painel Streamlit: analítico (Aula 19) e de desempenho da API (Aula 20); conexão segura, SQLi mitigado, filtros e cache (porta 8501) |
 
 Existe ainda um serviço `rabbitmq`, mas ele está atrás do profile `rabbitmq`
 (Aulas 9/10) e **não sobe** no caminho Kafka — que é o broker padrão da Aula 11.
@@ -270,6 +270,77 @@ DB_STATEMENT_TIMEOUT_MS=30000
 - **Funcionalidades:** filtros dinâmicos (data, status, ID), ordenação segura, tabela (`st.dataframe`), gráfico (`st.bar_chart`), métricas.
 - **Cache:** `@st.cache_data(ttl=60)`.
 - **Documentação:** [docs/aulas/19-dashboard.md](docs/aulas/19-dashboard.md).
+
+## Dashboard de Desempenho da API (Aula 20)
+
+O dashboard multipage do Streamlit inclui a página **Desempenho da API**
+(menu lateral em `http://localhost:8501`). A instrumentação é feita pelo
+middleware `core.observability.RegistrarMetricasMiddleware`, que grava uma
+linha em `core_requisicao_metrica` por requisição atendida sob `/api/`.
+`/health`, `/admin`, `/static` e docs ficam de fora para não distorcer a
+amostra.
+
+### Funcionalidades
+
+- **KPIs:** total de requisições, latência média (ms), p95 (ms), erros
+  (4xx/5xx), taxa de erro (%) e *cache hit rate* real.
+- **Gráficos:** throughput por hora, latência ao longo do tempo
+  (média/p95), distribuição por classe de status (2xx/3xx/4xx/5xx) e
+  requisições por endpoint.
+- **Filtros interativos:** período (data inicial/final), endpoint e classe
+  de status. Sem seleção em um filtro, ele não restringe o resultado.
+- **Cache:** o middleware grava os *deltas* de hits/misses/bypasses da
+  própria requisição (via `core.cache_metrics`), então a hit rate exibida é
+  medida, não estimada pela latência.
+- **Pedidos por status:** foto do estado em `core_pedido`. Não é
+  profundidade de fila do broker — o Kafka/RabbitMQ não é consultado por
+  HTTP.
+- **Carregamento:** `@st.cache_data(ttl=60)` nas consultas do painel.
+
+### Como subir e acessar
+
+A migração `0006` é aplicada pelo próprio serviço `api` no startup:
+
+```bash
+docker compose up -d --build
+```
+
+Também é possível reconstruir só o que mudou:
+
+```bash
+docker compose up -d --build api dashboard
+```
+
+Acesse [http://localhost:8501](http://localhost:8501) → **Desempenho da API**
+e gere tráfego para popular as métricas:
+
+```bash
+# Bash
+for i in $(seq 1 10); do curl -s http://localhost:8000/api/v1/items/ > /dev/null; done
+```
+
+```powershell
+# PowerShell
+1..10 | ForEach-Object {
+    Invoke-RestMethod -Uri "http://localhost:8000/api/v1/items/" -ErrorAction SilentlyContinue | Out-Null
+}
+```
+
+### Configuração e retenção
+
+- `API_METRICS_ENABLED=false` desliga a instrumentação (padrão: `true`).
+- O log cresce a cada requisição; pode ser podado com:
+
+  ```bash
+  docker compose exec api python api/manage.py limpar_metricas --dias 30
+  ```
+
+  Use `--dry-run` para apenas contar as linhas que seriam removidas.
+- Os contadores de cache são por processo do gunicorn (1 worker no Compose).
+  Com múltiplos workers, cada processo conta a sua parte e o dashboard soma
+  as linhas gravadas.
+
+Documentação técnica: [docs/aulas/20-desempenho.md](docs/aulas/20-desempenho.md).
 
 ## Referências
 

@@ -5,6 +5,21 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.20.0] - 2026-10-27 — Dashboard de Desempenho da API em Streamlit
+
+### Adicionado
+- **Instrumentação (Aula 20):** middleware `core.observability.RegistrarMetricasMiddleware` com medição de latência, normalização de paths, allow-list de rotas (`/api/`) e persistência em `core_requisicao_metrica`. Modelo e migração `0006_requisicaometrica`.
+- **Cache por requisição:** janela *por thread* em `core.cache_metrics` (`iniciar_requisicao`/`finalizar_requisicao`), gravada nas colunas `cache_hits`, `cache_misses` e `cache_bypasses`. O painel exibe a hit rate real, com bypass fora do denominador.
+- **Painel de desempenho:** página multipage `dashboard/pages/2_Desempenho_da_API.py` com KPIs (total, latência média/p95, taxa de erro e hit rate), gráficos temporais, distribuição por classe de status (2xx/3xx/4xx/5xx) com detalhe por código, requisições por endpoint, filtros interativos e `@st.cache_data(ttl=60)`.
+- **Consultas seguras:** `dashboard/performance.py` com SQLAlchemy Core e bind parameters, agregações, validação de período e pedidos por status.
+- **Retenção:** comando `manage.py limpar_metricas` (`--dias`, `--dry-run`) para podar o log de métricas.
+- **Infra:** `API_METRICS_ENABLED` no compose/API e `dashboard` depende de `api: service_healthy`.
+- **Testes:** `tests/unit/test_observability.py`, `tests/unit/test_dashboard_performance.py`, `tests/unit/test_cache_utils.py` (janela por requisição) e `tests/integration/test_api_metrics.py` (middleware, cache hit, toggle, poda).
+- **Documentação:** `docs/aulas/20-desempenho.md`, README e `.env.example`.
+
+### Corrigido
+- Restaurados `api/core/models.py` e `api/core/serializers.py` da linha de base das Aulas 9–14 (a versão em edição havia perdido `idempotency_key`, `slug`, `is_active` e estados do pagamento). A Aula 20 acrescenta apenas `RequisicaoMetrica`.
+
 ## [1.19.0] - 2026-10-23 — Conexão Segura, SQL Injection e Painel Streamlit
 
 ### Adicionado
