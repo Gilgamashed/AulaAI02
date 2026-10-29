@@ -29,6 +29,7 @@ spec; a implementação deve satisfazer apenas a spec da aula corrente (ver
 | 15–16 | Sem spec própria — continuação do trabalho das aulas anteriores |
 | 19 | [Conexão Segura, SQL Injection e Painel Streamlit](spec_da_aula_19.md) |
 | 20 | [Dashboard de Desempenho da API em Streamlit](spec_da_aula_20.md) |
+| 21 | [Consulta de Dados em Linguagem Natural (Texto-para-SQL)](spec_da_aula_21.md) |
 
 ## Relacionados
 

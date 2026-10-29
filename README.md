@@ -186,6 +186,7 @@ automaticamente no startup (o banco já está saudável via `depends_on`).
 | `/api/v1/categories/{id}/`     | GET, PUT, PATCH, DELETE   | Detalhe / atualizar / excluir categoria     |
 | `/api/v1/items/`               | GET, POST                 | Listar / criar produtos eletrônicos         |
 | `/api/v1/items/{id}/`          | GET, PUT, PATCH, DELETE   | Detalhe / atualizar / excluir produto       |
+| `/api/v1/ask_sql/`             | POST (admin)              | Pergunta em português → SELECT validado     |
 
 Status codes: **200** OK, **201** Created, **204** No Content, **400** Bad
 Request, **404** Not Found. Validações customizadas: preço não-negativo, SKU no
@@ -223,6 +224,9 @@ mantém o estado atual do projeto e o índice para navegação.
 | 12 | Testes automatizados e cobertura | [docs/testes.md](docs/testes.md) |
 | 13 | Checklist do Integrador Externo | [docs/integrador.md](docs/integrador.md) |
 | 14 | Assistente de IA e llm_service | [docs/aulas/14-ia.md](docs/aulas/14-ia.md) |
+| 19 | Conexão segura, SQL Injection e painel Streamlit | [docs/aulas/19-dashboard.md](docs/aulas/19-dashboard.md) |
+| 20 | Dashboard de desempenho da API | [docs/aulas/20-desempenho.md](docs/aulas/20-desempenho.md) |
+| 21 | Consulta em linguagem natural (texto-para-SQL) | [docs/aulas/21-consulta-linguagem-natural.md](docs/aulas/21-consulta-linguagem-natural.md) |
 
 ## Documentação útil
 
@@ -341,6 +345,122 @@ for i in $(seq 1 10); do curl -s http://localhost:8000/api/v1/items/ > /dev/null
   as linhas gravadas.
 
 Documentação técnica: [docs/aulas/20-desempenho.md](docs/aulas/20-desempenho.md).
+
+## Consulta em Linguagem Natural / Texto-para-SQL (Aula 21)
+
+O endpoint `POST /api/v1/ask_sql/` recebe uma pergunta de negócio em português,
+monta o prompt com o **schema permitido**, gera uma consulta SQL **somente
+leitura**, valida, executa com timeout e devolve o SQL e as linhas em JSON.
+A página **Consulta em Linguagem Natural** do Streamlit consome esse endpoint.
+
+O acesso é restrito ao papel **admin** (`IsAdminRole`): a consulta pode ler
+pedidos, pagamentos e usuários de toda a base. O login do painel usa
+`/api/v1/auth/token/` e guarda o JWT na sessão do Streamlit.
+
+### Exemplo (PowerShell)
+
+```powershell
+$login = Invoke-RestMethod -Method Post `
+  -Uri 'http://localhost:8000/api/v1/auth/token/' `
+  -ContentType 'application/json' `
+  -Body (@{ username='demo_admin'; password='demo-admin@Synapse2026' } | ConvertTo-Json -Compress)
+
+$headers = @{ Authorization = "Bearer $($login.access)" }
+$corpo = @{ question = 'Quais os 5 últimos usuários cadastrados?' } | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method Post `
+  -Uri 'http://localhost:8000/api/v1/ask_sql/' `
+  -Headers $headers -ContentType 'application/json' -Body $corpo |
+  ConvertTo-Json -Depth 6
+```
+
+```bash
+# Bash
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token/ \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"demo_admin","password":"demo-admin@Synapse2026"}' |
+  python -c 'import json,sys; print(json.load(sys.stdin)["access"])')
+
+curl -s -X POST http://localhost:8000/api/v1/ask_sql/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"Qual a soma do valor dos últimos 3 pedidos?"}'
+```
+
+Resposta (200):
+
+```json
+{
+  "question": "Qual a soma do valor dos últimos 3 pedidos?",
+  "sql": "SELECT SUM(total) AS soma_total FROM (SELECT total FROM core_pedido ORDER BY created_at DESC LIMIT 3) AS ultimos_pedidos",
+  "columns": ["soma_total"],
+  "rows": [{"soma_total": 60.0}],
+  "row_count": 1,
+  "truncated": false,
+  "meta": {"tokens_prompt": 812, "tokens_output": 32, "modelo": "mock-sql"}
+}
+```
+
+Erros: **400** payload inválido · **401** sem JWT · **403** sem papel admin ·
+**422** pergunta fora do domínio, SQL proibido ou erro de execução (inclui
+`examples`) · **500** IA mal configurada · **502** resposta inválida do
+provedor · **503** provedor/banco indisponível.
+
+### Interface Streamlit
+
+1. Suba o ambiente e rode o seed:
+
+   ```bash
+   docker compose up -d --build
+   docker compose exec api python api/manage.py seed_auth
+   ```
+
+2. Acesse [http://localhost:8501](http://localhost:8501) → **Consulta em
+   Linguagem Natural**.
+3. Entre com `demo_admin` / `demo-admin@Synapse2026`, digite a pergunta (ou
+   escolha um exemplo) e clique em **Consultar**.
+4. A página mostra o SQL gerado (`st.code`), a contagem/truncamento e a tabela
+   (`st.dataframe`).
+
+### Segurança em camadas
+
+- **Validação:** apenas `SELECT`/`WITH`, um único comando, sem comentários,
+  allow-list das tabelas `auth_user`, `core_pedido`, `core_pagamento`,
+  `core_notificacao`, `core_item` e `core_category`; bloqueio de `SELECT *`,
+  colunas sensíveis (`password`, `idempotency_key`, `transacao_id`),
+  `FOR UPDATE`, `pg_catalog`/`information_schema` e funções perigosas
+  (`pg_sleep`, `nextval`, `dblink` etc.).
+- **Execução:** transação `READ ONLY`, `statement_timeout` local
+  (`ASK_SQL_TIMEOUT_MS`) e `LIMIT` obrigatório/clampado
+  (`ASK_SQL_MAX_LINHAS`).
+- **Defesa em profundidade:** mesmo que o provedor desobedeça ao prompt, o
+  banco recusa escrita na transação read-only.
+
+### Limitações registradas
+
+- O provedor desta aula é o **mock determinístico** `ProvedorMockSql` (mesma
+  porta `ProvedorLlm` da Aula 14), sem rede e sem credenciais. Ele cobre os
+  padrões de negócio documentados; não é linguagem natural irrestrita. Um
+  adaptador de LLM real entra pela mesma porta sem mudar validação/execução.
+- `enderecos_entrega` **não existe** neste domínio; perguntas sobre endereço
+  retornam 422 em vez de inventar tabela/colunas.
+- A transação read-only e o `statement_timeout` protegem contra mutação e
+  consultas caras; não substituem um papel de banco exclusivamente read-only
+  (evolução futura).
+
+### Configuração
+
+```env
+LLM_MODEL_SQL=mock-sql
+ASK_SQL_MAX_LINHAS=200
+ASK_SQL_TIMEOUT_MS=3000
+ASK_SQL_MAX_TOKENS=500
+ASK_SQL_LOG_LEVEL=INFO
+DASHBOARD_API_URL=http://api:8000
+```
+
+Documentação técnica e roteiro de teste:
+[docs/aulas/21-consulta-linguagem-natural.md](docs/aulas/21-consulta-linguagem-natural.md).
 
 ## Referências
 

@@ -5,6 +5,23 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.21.0] - 2026-10-28 — Consulta de Dados em Linguagem Natural (Texto-para-SQL)
+
+### Adicionado
+- **Endpoint `POST /api/v1/ask_sql/` (Aula 21):** pergunta em português → SQL somente leitura → linhas em JSON (`question`, `sql`, `columns`, `rows`, `row_count`, `truncated`, `meta`). Restrito ao papel `admin` (`IsAdminRole`) e ao JWT.
+- **Pipeline `api/core/ask_sql/`:** allow-list de tabelas/colunas (`constantes.py`), contexto de schema (`schema.py`), system prompt (`prompt.py`), extração tolerante a markdown (`extracao.py`), validação (`validacao.py`), execução read-only (`execucao.py`), orquestração (`servico.py`), serializer e view com mapa de erros 400/401/403/422/500/502/503.
+- **Provedor `ProvedorMockSql` (Aula 21):** mock determinístico na mesma porta `ProvedorLlm` da Aula 14, sem rede/credenciais; traduz os padrões de negócio do DoD e devolve `NAO_SUPORTADO` para o restante.
+- **Fábrica por tarefa:** `criar_llm_service(tarefa="assist"|"sql")`, com singleton e circuit breaker independentes; setting `LLM_MODEL_SQL`.
+- **Painel Streamlit:** página `dashboard/pages/3_Consulta_em_Linguagem_Natural.py` (login, pergunta, SQL em `st.code`, resultado em `st.dataframe`) e cliente HTTP `dashboard/ask_sql.py` (somente biblioteca padrão).
+- **Configuração:** `ASK_SQL_MAX_LINHAS` (200), `ASK_SQL_TIMEOUT_MS` (3000), `ASK_SQL_MAX_TOKENS` (500), `ASK_SQL_LOG_LEVEL`, `DASHBOARD_API_URL` no Compose/`.env.example`; logger `core.ask_sql`.
+- **Testes:** `tests/unit/test_ask_sql_{schema,validacao,extracao,mock}.py`, `tests/unit/test_dashboard_ask_sql.py` e `tests/integration/test_ask_sql_endpoint.py` (inclui prova de que a transação read-only recusa escrita).
+- **Documentação:** `docs/aulas/21-consulta-linguagem-natural.md`, README, `PROMPTS.md`, `specs/README.md` e OpenAPI.
+
+### Segurança
+- Validação independente do modelo: apenas `SELECT`/`WITH`, um comando, sem comentários/aspas/`$`, allow-list de tabelas e colunas, sem `SELECT *`, sem `FOR UPDATE`, sem `pg_catalog`/`information_schema` e sem funções perigosas.
+- Execução em transação `READ ONLY` com `statement_timeout` local e `LIMIT` obrigatório/clampado; falha de execução vira 422 e indisponibilidade do banco 503.
+- `auth_user.password`, `idempotency_key`, `transacao_id` e tabelas internas do Django nunca entram no prompt nem podem ser projetadas. `enderecos_entrega` não existe no domínio: a pergunta retorna 422 em vez de inventar tabela.
+
 ## [1.20.0] - 2026-10-27 — Dashboard de Desempenho da API em Streamlit
 
 ### Adicionado

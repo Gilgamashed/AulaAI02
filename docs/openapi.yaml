@@ -1,15 +1,17 @@
 openapi: 3.1.0
 info:
   title: SynapseShop API
-  version: 1.14.1
+  version: 1.21.0
   description: |
-    Documentação OpenAPI do MVP SynapseShop (Aula 14).
+    Documentação OpenAPI do MVP SynapseShop (Aula 21).
 
     Contrato da API principal (`api/` — Django REST Framework) e do
     microsserviço complementar de estoque (`services/inventory/` — FastAPI).
 
     A Aula 14 adicionou o assistente de IA (`POST /api/v1/assist/`) e a
-    telemetria do provedor (`GET /api/v1/llm/metrics/`).
+    telemetria do provedor (`GET /api/v1/llm/metrics/`). A Aula 21 adicionou a
+    consulta em linguagem natural (`POST /api/v1/ask_sql/`): a pergunta vira
+    um `SELECT` validado e executado em transação read-only.
 
     ## Convenções de contrato
 
@@ -72,6 +74,8 @@ tags:
     description: Assistente de IA (sumariza/explica logs operacionais)
   - name: llm
     description: Telemetria do provedor de IA (admin)
+  - name: ask_sql
+    description: Consulta de dados em linguagem natural / texto-para-SQL (admin)
   - name: inventory
     description: Microsserviço de estoque (FastAPI)
 
@@ -1022,6 +1026,92 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailableLlm"
+
+  /api/v1/ask_sql/:
+    post:
+      operationId: consultarEmLinguagemNatural
+      summary: Converte pergunta de negócio em SELECT somente leitura (Aula 21)
+      description: |
+        Recebe uma pergunta em português, monta o prompt com a allow-list de
+        schema (`auth_user`, `core_pedido`, `core_pagamento`,
+        `core_notificacao`, `core_item`, `core_category`), gera uma consulta
+        SQL, **valida** e executa em transação `READ ONLY` com
+        `statement_timeout` local.
+
+        **Acesso:** JWT obrigatório e papel `admin` — a consulta pode ler
+        pedidos, pagamentos e usuários de toda a base.
+
+        **Segurança:** apenas `SELECT`/`WITH` e um único comando; sem
+        comentários, identificadores entre aspas ou literais de dólar; sem
+        `SELECT *`, DML/DDL, `FOR UPDATE`, `pg_catalog`/`information_schema`,
+        funções perigosas ou colunas sensíveis. O `LIMIT` é obrigatório e
+        clampado por `ASK_SQL_MAX_LINHAS`; a execução ainda é read-only no
+        banco, mesmo que o provedor desobedeça ao prompt.
+
+        **Pergunta fora do domínio:** o provedor responde `NAO_SUPORTADO` e a
+        API devolve **422** com `examples` de perguntas aceitas.
+      tags:
+        - ask_sql
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AskSqlRequest"
+            example:
+              question: Quais os 5 últimos usuários cadastrados?
+      responses:
+        "200":
+          description: Consulta gerada, validada e executada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AskSqlResponse"
+              example:
+                question: Quais os 5 últimos usuários cadastrados?
+                sql: |
+                  SELECT id, username, email, first_name, last_name, is_active, date_joined
+                  FROM auth_user
+                  ORDER BY date_joined DESC
+                  LIMIT 5
+                columns:
+                  - id
+                  - username
+                  - email
+                  - first_name
+                  - last_name
+                  - is_active
+                  - date_joined
+                rows:
+                  - id: 4
+                    username: cliente3
+                    email: ""
+                    first_name: ""
+                    last_name: ""
+                    is_active: true
+                    date_joined: "2026-10-28T12:00:00+00:00"
+                row_count: 1
+                truncated: false
+                meta:
+                  tokens_prompt: 812
+                  tokens_output: 32
+                  modelo: mock-sql
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "500":
           $ref: "#/components/responses/InternalServerError"
         "502":
@@ -2142,6 +2232,65 @@ components:
           required: [tokens_prompt, tokens_output]
       required: [answer, meta]
 
+    AskSqlRequest:
+      type: object
+      description: |
+        Entrada do `POST /api/v1/ask_sql/`. A pergunta é texto livre em
+        português (máx. 500 caracteres); tipos não textuais são recusados.
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Pergunta de negócio em linguagem natural.
+      required: [question]
+      example:
+        question: Qual a soma do valor dos últimos 3 pedidos?
+
+    AskSqlResponse:
+      type: object
+      description: |
+        Resposta do texto-para-SQL. `sql` já passou pela validação e tem
+        `LIMIT` aplicado/clampado; `truncated` indica que havia mais linhas
+        que o teto configurado.
+      properties:
+        question:
+          type: string
+          description: Pergunta normalizada (sem espaços nas pontas).
+        sql:
+          type: string
+          description: Consulta somente leitura validada, com `LIMIT`.
+        columns:
+          type: array
+          items:
+            type: string
+          description: Nomes das colunas na ordem do cursor.
+        rows:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: Linhas serializadas (Decimal → number, datas → ISO-8601).
+        row_count:
+          type: integer
+          minimum: 0
+          description: Quantidade de linhas devolvidas (não o total da tabela).
+        truncated:
+          type: boolean
+          description: Verdadeiro quando o resultado excedeu `ASK_SQL_MAX_LINHAS`.
+        meta:
+          type: object
+          properties:
+            tokens_prompt:
+              type: integer
+            tokens_output:
+              type: integer
+            modelo:
+              type: string
+              description: Provedor/modelo efetivo (`mock-sql` no mock da Aula 21).
+          required: [tokens_prompt, tokens_output, modelo]
+      required: [question, sql, columns, rows, row_count, truncated, meta]
+
     LlmMetrics:
       type: object
       description: |
@@ -2457,3 +2606,23 @@ components:
             title: Internal Server Error
             status: 500
             detail: A camada de IA está mal configurada no servidor.
+    UnprocessableEntity:
+      description: |
+        Consulta não pôde ser produzida ou executada — pergunta fora do
+        domínio, SQL proibido/ausente ou erro do PostgreSQL. Quando a pergunta
+        está fora do domínio, a resposta inclui `examples`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorSchema"
+          example:
+            type: about:blank
+            title: Unprocessable Entity
+            status: 422
+            detail: a pergunta não pode ser respondida com o schema disponível
+            code: AskSqlNaoSuportada
+            errors:
+              examples:
+                - Quais os 5 últimos usuários cadastrados?
+                - Qual a soma do valor dos últimos 3 pedidos?
+                - Quais usuários fizeram mais pedidos?
