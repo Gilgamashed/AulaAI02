@@ -37,6 +37,7 @@ from .erros import (
 )
 from .metricas import FALHA, SUCESSO, TERMINAL, llm_metrics
 from .mock import ProvedorMock
+from .mock_sql import ProvedorMockSql
 from .portas import LlmResposta, ProvedorLlm
 from .redacao import redigir
 from .retry import RetryPolicy
@@ -69,6 +70,11 @@ class LlmService:
         self._redacao_ativa = redacao_ativa
         self._custo_input_por_1m = max(0.0, custo_input_por_1m)
         self._custo_output_por_1m = max(0.0, custo_output_por_1m)
+
+    @property
+    def modelo(self) -> str:
+        """Modelo informacional usado nos metadados das respostas."""
+        return self._modelo
 
     def completar(
         self,
@@ -196,23 +202,31 @@ class LlmService:
 # ser compartilhado entre elas.
 # ---------------------------------------------------------------------
 PROVIDER_MOCK = "mock"
+TAREFA_ASSIST = "assist"
+TAREFA_SQL = "sql"
+TAREFAS = frozenset({TAREFA_ASSIST, TAREFA_SQL})
 
-_instancia: LlmService | None = None
+_instancias: dict[str, LlmService] = {}
 _trava_singleton = threading.Lock()
 
 
-def criar_llm_service() -> LlmService:
-    """Singleton do llm_service, montado a partir das settings do Django."""
-    global _instancia
+def criar_llm_service(tarefa: str = TAREFA_ASSIST) -> LlmService:
+    """Singleton do llm_service por tarefa, montado a partir das settings.
+
+    Cada tarefa tem o próprio provedor e o próprio circuit breaker: uma falha
+    no assistente não deve abrir o circuito do texto-para-SQL (e vice-versa).
+    """
+    if tarefa not in TAREFAS:
+        raise LlmConfiguracaoInvalida(f"tarefa de IA desconhecida: '{tarefa}'")
     with _trava_singleton:
-        if _instancia is None:
+        if tarefa not in _instancias:
             from django.conf import settings
 
-            _instancia = _montar(settings)
-    return _instancia
+            _instancias[tarefa] = _montar(settings, tarefa)
+    return _instancias[tarefa]
 
 
-def _montar(cfg: Any) -> LlmService:
+def _montar(cfg: Any, tarefa: str = TAREFA_ASSIST) -> LlmService:
     """Lê a configuração e compõe retry + breaker + mock com as políticas."""
     provedor_bruto = str(getattr(cfg, "LLM_PROVIDER", PROVIDER_MOCK)).strip().lower()
     if provedor_bruto != PROVIDER_MOCK:
@@ -233,12 +247,23 @@ def _montar(cfg: Any) -> LlmService:
         cooldown_segundos=float(getattr(cfg, "LLM_CB_COOLDOWN_SEGUNDOS", 30.0)),
         max_tentativas_half_open=int(getattr(cfg, "LLM_CB_MAX_TENTATIVAS_HALF_OPEN", 2)),
     )
+    provedor: ProvedorLlm = (
+        ProvedorMockSql() if tarefa == TAREFA_SQL else ProvedorMock()
+    )
+    modelo_padrao = "mock-sql" if tarefa == TAREFA_SQL else "mock"
+    modelo = str(
+        getattr(
+            cfg,
+            "LLM_MODEL_SQL" if tarefa == TAREFA_SQL else "LLM_MODEL",
+            modelo_padrao,
+        )
+    )
     return LlmService(
-        ProvedorMock(),
+        provedor,
         retry=retry,
         breaker=breaker,
         timeout_segundos=float(getattr(cfg, "LLM_TIMEOUT_SEGUNDOS", 5.0)),
-        modelo=str(getattr(cfg, "LLM_MODEL", "mock")),
+        modelo=modelo,
         redacao_ativa=bool(getattr(cfg, "LLM_REDACAO_ATIVA", True)),
         custo_input_por_1m=float(getattr(cfg, "LLM_CUSTO_INPUT_POR_1M_TOKENS", 0.0)),
         custo_output_por_1m=float(getattr(cfg, "LLM_CUSTO_OUTPUT_POR_1M_TOKENS", 0.0)),

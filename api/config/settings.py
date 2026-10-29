@@ -550,6 +550,10 @@ PAGAMENTO_PERMITIR_SIMULACAO_FALHA = _env_flag(
 #                               para o provedor real quando o adaptador chegar.
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mock").strip().lower()
 LLM_MODEL = os.environ.get("LLM_MODEL", "mock")
+# Aula 21: o texto-para-SQL usa um provedor mock especializado (mesma porta
+# `ProvedorLlm`); o nome aparece em `meta.modelo` para deixar claro que o SQL
+# não veio de um modelo externo.
+LLM_MODEL_SQL = os.environ.get("LLM_MODEL_SQL", "mock-sql")
 LLM_TIMEOUT_SEGUNDOS = float(os.environ.get("LLM_TIMEOUT_SEGUNDOS", "5.0"))
 LLM_MAX_TENTATIVAS = int(os.environ.get("LLM_MAX_TENTATIVAS", "3"))
 LLM_BACKOFF_BASE_SEGUNDOS = float(os.environ.get("LLM_BACKOFF_BASE_SEGUNDOS", "1.0"))
@@ -567,6 +571,18 @@ LLM_CUSTO_INPUT_POR_1M_TOKENS = float(
 LLM_CUSTO_OUTPUT_POR_1M_TOKENS = float(
     os.environ.get("LLM_CUSTO_OUTPUT_POR_1M_TOKENS", "15.00")
 )
+
+# =====================================================================
+# Aula 21 — Texto-para-SQL (`POST /api/v1/ask_sql/`)
+# =====================================================================
+# A execução é sempre read-only; estes limites são a proteção contra consultas
+# caras e respostas gigantes:
+#   ASK_SQL_MAX_LINHAS  -> teto de linhas devolvidas (LIMIT aplicado/clampado).
+#   ASK_SQL_TIMEOUT_MS  -> statement_timeout local da transação (ms).
+#   ASK_SQL_MAX_TOKENS  -> teto de tokens pedido ao provedor de IA.
+ASK_SQL_MAX_LINHAS = int(os.environ.get("ASK_SQL_MAX_LINHAS", "200"))
+ASK_SQL_TIMEOUT_MS = int(os.environ.get("ASK_SQL_TIMEOUT_MS", "3000"))
+ASK_SQL_MAX_TOKENS = int(os.environ.get("ASK_SQL_MAX_TOKENS", "500"))
 
 # =====================================================================
 # Aula 8 — Logging estruturado (JSON) do cache
@@ -611,6 +627,13 @@ LOGGING = {
         "core.llm": {
             "handlers": ["console"],
             "level": os.environ.get("LLM_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+        # Aula 21: eventos do texto-para-SQL (pergunta não suportada, SQL
+        # proibido, falha de execução). Filtre por `"core.ask_sql"` nos logs.
+        "core.ask_sql": {
+            "handlers": ["console"],
+            "level": os.environ.get("ASK_SQL_LOG_LEVEL", "INFO"),
             "propagate": False,
         },
     },

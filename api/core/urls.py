@@ -6,6 +6,7 @@ from rest_framework_simplejwt.views import (
     TokenVerifyView,
 )
 
+from .ask_sql.views import AskSqlView
 from .throttling import ThrottleMemoriaScope
 from .views import (
     AssistView,
@@ -79,4 +80,8 @@ urlpatterns = [
     # Aula 14: telemetria do llm_service (latência, taxa de erro, tokens,
     # custo estimado). Restrito ao papel admin — ver LlmMetricsView.
     path("llm/metrics/", LlmMetricsView.as_view(), name="llm-metrics"),
+    # Aula 21: `POST /api/v1/ask_sql/` — pergunta de negócio em linguagem
+    # natural vira SELECT validado e executado em transação read-only.
+    # Restrito ao papel admin — ver AskSqlView.
+    path("ask_sql/", AskSqlView.as_view(), name="ask-sql"),
 ] + router.urls

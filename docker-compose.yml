@@ -131,6 +131,13 @@ services:
       LLM_REDACAO_ATIVA: ${LLM_REDACAO_ATIVA:-true}
       LLM_CUSTO_INPUT_POR_1M_TOKENS: ${LLM_CUSTO_INPUT_POR_1M_TOKENS:-5.00}
       LLM_CUSTO_OUTPUT_POR_1M_TOKENS: ${LLM_CUSTO_OUTPUT_POR_1M_TOKENS:-15.00}
+      # Aula 21 (texto-para-SQL): o provedor `sql` é o mock especializado; os
+      # limites valem para toda consulta, independentemente do SQL gerado.
+      LLM_MODEL_SQL: ${LLM_MODEL_SQL:-mock-sql}
+      ASK_SQL_MAX_LINHAS: ${ASK_SQL_MAX_LINHAS:-200}
+      ASK_SQL_TIMEOUT_MS: ${ASK_SQL_TIMEOUT_MS:-3000}
+      ASK_SQL_MAX_TOKENS: ${ASK_SQL_MAX_TOKENS:-500}
+      ASK_SQL_LOG_LEVEL: ${ASK_SQL_LOG_LEVEL:-INFO}
       API_METRICS_ENABLED: ${API_METRICS_ENABLED:-true}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -497,6 +504,10 @@ services:
       REDIS_URL_DEDUPE: ${REDIS_URL_DEDUPE:-redis://redis:6379/0}
       MENSAGERIA_BROKER: ${MENSAGERIA_BROKER:-kafka}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-synapse}:${RABBITMQ_PASSWORD:-synapse}@rabbitmq:5672/%2F
+      # Aula 21: fixados para o teste não depender do .env de quem roda a suíte.
+      ASK_SQL_MAX_LINHAS: 200
+      ASK_SQL_TIMEOUT_MS: 3000
+      ASK_SQL_MAX_TOKENS: 500
     # O comando da imagem já é `pytest` (fallback do Dockerfile.tests); aqui o
     # compose apenas o mantém explícito.
     command: ["pytest"]
@@ -532,6 +543,9 @@ services:
       DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-1800}
       DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-10}
       DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-30000}
+      # Aula 21: a página de linguagem natural chama a API por HTTP (o SQL é
+      # validado/executado lá), e não abre conexão própria com o banco.
+      DASHBOARD_API_URL: ${DASHBOARD_API_URL:-http://api:8000}
     volumes:
       - ./dashboard:/app/dashboard
     healthcheck:

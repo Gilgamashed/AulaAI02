@@ -37,9 +37,16 @@ from .erros import (
     descrever,
 )
 from .mock import ProvedorMock
+from .mock_sql import ProvedorMockSql
 from .portas import LlmResposta, ProvedorLlm
 from .retry import RetryPolicy
-from .servico import PROVIDER_MOCK, LlmService, criar_llm_service
+from .servico import (
+    PROVIDER_MOCK,
+    TAREFA_ASSIST,
+    TAREFA_SQL,
+    LlmService,
+    criar_llm_service,
+)
 
 __all__ = [
     "CircuitBreaker",
@@ -60,8 +67,11 @@ __all__ = [
     "PROVIDER_MOCK",
     "ProvedorLlm",
     "ProvedorMock",
+    "ProvedorMockSql",
     "RespostaInvalida",
     "RetryPolicy",
+    "TAREFA_ASSIST",
+    "TAREFA_SQL",
     "criar_llm_service",
     "descrever",
 ]
