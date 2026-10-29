@@ -98,8 +98,11 @@ omit = [
     "*/admin.py",
     # `apps.py` só declara o AppConfig do Django (nome e auto_field).
     "*/apps.py",
-    # Painel Streamlit (UI) — não medimos cobertura da interface
+    # Painel Streamlit (UI) — não medimos cobertura da interface. As páginas
+    # multipage executam a UI já no import; a lógica testável fica nos módulos
+    # que elas importam (`dashboard/ask_sql.py`, `dashboard/performance.py`).
     "*/dashboard/app.py",
+    "*/dashboard/pages/*",
     # Infra de mensageria (`api/core/messaging/*`): só roda em worker/CLI
     # (`consumir_pedidos`, `republicar_pedidos`, `declarar_topicos_kafka`) —"
     # o pytest nunca os exercita, e a suíte deliberadamente não toca broker
