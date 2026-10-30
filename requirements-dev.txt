@@ -27,3 +27,9 @@ pytest-cov>=6.0,<7.0
 # ele, os testes de integração do inventory não têm com o que rodar — o
 # TestClient usa o componente `httpx` em vez do `requests`.
 httpx>=0.28,<1.0
+
+# --- Lint --------------------------------------------------------------
+# ruff: mesmo linter do gate local e do CI (Aula 22). Pin exato porque a
+# seleção de regras em `[tool.ruff.lint]` é fixa, mas uma versão nova pode
+# mudar a semântica de uma regra e reprovar código que já passava.
+ruff==0.16.8

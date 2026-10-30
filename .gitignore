@@ -21,6 +21,7 @@ ENV/
 *.key
 
 # Testes e cobertura
+reports/
 .pytest_cache/
 .coverage
 htmlcov/

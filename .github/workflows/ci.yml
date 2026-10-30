@@ -1,0 +1,114 @@
+# =====================================================================
+# SynapseShop — Integração Contínua (Aula 22)
+#
+# O que este workflow garante a cada push/PR:
+#   1. O código passa no lint (ruff na versão pinada em requirements-dev.txt).
+#   2. A suíte completa roda contra um PostgreSQL real e derruba o pipeline
+#      se um teste quebrar — inclusive o gate de cobertura de 85% dos addopts.
+#   3. A imagem Docker da API continua construindo (empacotamento íntegro).
+#
+# Fora de escopo (Aula 23): deploy, publicação em registry e cache avançado
+# de dependências.
+# =====================================================================
+name: CI
+
+on:
+  push:
+    branches: [main, master, dev]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+# Menor privilégio: o workflow só lê o repositório para checkout/build.
+permissions:
+  contents: read
+
+jobs:
+  test-and-lint:
+    name: Testes e lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # A suíte de integração do Django cria um banco `test_*` no PostgreSQL.
+    # Redis, Kafka e RabbitMQ não entram: `settings_test` usa LocMemCache e o
+    # conftest substitui a publicação de eventos por um duplo em memória.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: synapse
+          POSTGRES_PASSWORD: synapse
+          POSTGRES_DB: synapse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U synapse -d synapse"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://synapse:synapse@localhost:5432/synapse
+      # O settings_test fixa SECRET_KEY/JWT próprios; este valor só evita
+      # depender de segredo cadastrado para a pipeline nascer verde. Se o
+      # repositório tiver o secret, ele é usado.
+      DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY || 'ci-insecure-synapseshop' }}
+      DJANGO_DEBUG: "False"
+      MENSAGERIA_BROKER: kafka
+      # Mesmos limites fixados no serviço `tests` do docker-compose.yml.
+      ASK_SQL_MAX_LINHAS: "200"
+      ASK_SQL_TIMEOUT_MS: "3000"
+      ASK_SQL_MAX_TOKENS: "500"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      - name: Testes (pytest + cobertura)
+        # `reports/` precisa existir antes de o pytest abrir junit/coverage.
+        run: |
+          mkdir -p reports
+          python -m pytest \
+            --junitxml=reports/junit.xml \
+            --cov-report=xml:reports/coverage.xml
+
+      - name: Publicar relatórios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios-testes
+          path: |
+            reports/
+            htmlcov/
+          if-no-files-found: warn
+          retention-days: 7
+
+  docker-build:
+    name: Build da imagem Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build da imagem da API
+        # Mesma tag do DoD: valida o Dockerfile multistage e o empacotamento
+        # sem precisar de banco, Redis ou broker (o CMD só roda no runtime).
+        run: docker build --tag synapseshop-api:test .
+
+      - name: Confirmar imagem criada
+        run: docker image inspect synapseshop-api:test --format '{{.Id}}'
