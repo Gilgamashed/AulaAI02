@@ -1,6 +1,6 @@
 # SynapseShop
 
-[![CI](https://github.com/Gilgamashed/AulaAI02/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Gilgamashed/AulaAI02/actions/workflows/ci.yml)
+[![CI](https://github.com/Gilgamashed/AulaAI02/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/Gilgamashed/AulaAI02/actions/workflows/ci.yml)
 
 Backend de Pedidos com Inteligência Artificial — MVP do projeto da squad.
 
@@ -469,7 +469,9 @@ Documentação técnica e roteiro de teste:
 
 O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda a cada
 push em `main`, `master` e `dev`, em pull requests para o branch principal e
-também sob demanda (`workflow_dispatch`).
+também sob demanda (`workflow_dispatch`). O badge acompanha `dev` — o branch
+com execuções contínuas; ao promover o workflow para `main`, troque a query
+para `?branch=main`.
 
 | Job | Runner | O que valida |
 | --- | --- | --- |

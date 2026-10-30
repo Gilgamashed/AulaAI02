@@ -32,7 +32,9 @@ Arquivo: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml).
 
 `dev` foi incluído além do que a spec pede porque é o branch de integração do
 projeto: sem ele, nenhum commit diário seria verificado até a abertura de um
-PR. O badge do README continua apontando para `main`.
+PR. O badge do README acompanha `dev` (query `?branch=dev`), porque é o branch
+com execuções contínuas; após a promoção do workflow para `main`, troque para
+`?branch=main`.
 
 ### Job `test-and-lint`
 
