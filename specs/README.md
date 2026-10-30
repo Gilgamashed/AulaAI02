@@ -30,6 +30,7 @@ spec; a implementação deve satisfazer apenas a spec da aula corrente (ver
 | 19 | [Conexão Segura, SQL Injection e Painel Streamlit](spec_da_aula_19.md) |
 | 20 | [Dashboard de Desempenho da API em Streamlit](spec_da_aula_20.md) |
 | 21 | [Consulta de Dados em Linguagem Natural (Texto-para-SQL)](spec_da_aula_21.md) |
+| 22 | [Pipeline de CI/CD com GitHub Actions](spec_da_aula_22.md) |
 
 ## Relacionados
 

@@ -1,5 +1,7 @@
 # SynapseShop
 
+[![CI](https://github.com/Gilgamashed/AulaAI02/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Gilgamashed/AulaAI02/actions/workflows/ci.yml)
+
 Backend de Pedidos com Inteligência Artificial — MVP do projeto da squad.
 
 ## Equipe
@@ -227,6 +229,7 @@ mantém o estado atual do projeto e o índice para navegação.
 | 19 | Conexão segura, SQL Injection e painel Streamlit | [docs/aulas/19-dashboard.md](docs/aulas/19-dashboard.md) |
 | 20 | Dashboard de desempenho da API | [docs/aulas/20-desempenho.md](docs/aulas/20-desempenho.md) |
 | 21 | Consulta em linguagem natural (texto-para-SQL) | [docs/aulas/21-consulta-linguagem-natural.md](docs/aulas/21-consulta-linguagem-natural.md) |
+| 22 | Pipeline de CI/CD com GitHub Actions | [docs/aulas/22-ci-cd.md](docs/aulas/22-ci-cd.md) |
 
 ## Documentação útil
 
@@ -461,6 +464,60 @@ DASHBOARD_API_URL=http://api:8000
 
 Documentação técnica e roteiro de teste:
 [docs/aulas/21-consulta-linguagem-natural.md](docs/aulas/21-consulta-linguagem-natural.md).
+
+## Pipeline de CI/CD com GitHub Actions (Aula 22)
+
+O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda a cada
+push em `main`, `master` e `dev`, em pull requests para o branch principal e
+também sob demanda (`workflow_dispatch`).
+
+| Job | Runner | O que valida |
+| --- | --- | --- |
+| `test-and-lint` | `ubuntu-latest` | `ruff check .`, suíte `pytest` completa e gate de cobertura de 85% |
+| `docker-build` | `ubuntu-latest` | `docker build -t synapseshop-api:test .` (Dockerfile multistage) |
+
+A suíte não usa Redis, Kafka nem RabbitMQ: `config.settings_test` troca os
+caches por `LocMemCache` e o `tests/conftest.py` substitui a publicação de
+eventos por um duplo em memória. O único serviço externo é um PostgreSQL 16
+efêmero, porque o `pytest-django` cria e destrói o banco `test_*`.
+
+### Variáveis e segredos
+
+Nenhum segredo é obrigatório: o banco do runner é descartável e
+`config.settings_test` fixa `SECRET_KEY` e `JWT_SIGNING_KEY`. O workflow lê
+`secrets.DJANGO_SECRET_KEY` quando ele existe e cai num valor efêmero de CI
+quando não existe — assim um fork ou um PR sem acesso a secrets também roda.
+
+Para cadastrar o segredo (opcional):
+
+```bash
+gh secret set DJANGO_SECRET_KEY --repo Gilgamashed/AulaAI02
+```
+
+Ou em **Settings → Secrets and variables → Actions → New repository secret**.
+O mesmo painel serve para variáveis não sensíveis (`vars.*`), que não são
+necessárias nesta aula.
+
+### Rodar o equivalente local
+
+```bash
+docker compose build tests            # instala as dependências de dev (inclui ruff)
+docker compose run --rm tests         # pytest + cobertura (gate de 85%)
+docker compose run --rm tests python -m ruff check .
+docker build -t synapseshop-api:test .
+```
+
+O job publica `reports/junit.xml`, `reports/coverage.xml` e `htmlcov/` como
+artefatos (`relatorios-testes`, retenção de 7 dias), mesmo quando a suíte
+falha.
+
+### Limites desta aula
+
+Deploy contínuo, publicação de imagem em registry (DockerHub/GHCR) e cache
+avançado de dependências ficam para a Aula 23. O job `docker-build` apenas
+prova que a imagem constrói localmente no runner.
+
+Documentação técnica: [docs/aulas/22-ci-cd.md](docs/aulas/22-ci-cd.md).
 
 ## Referências
 

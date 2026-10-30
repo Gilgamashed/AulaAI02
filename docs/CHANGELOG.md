@@ -5,6 +5,25 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.22.0] - 2026-10-30 — Pipeline de CI/CD com GitHub Actions
+
+### Adicionado
+- **Workflow `.github/workflows/ci.yml` (Aula 22):** dispara em `push` para `main`, `master` e `dev`, em `pull_request` para o branch principal e por `workflow_dispatch`.
+- **Job `test-and-lint`:** Python 3.12, PostgreSQL 16 efêmero para o banco `test_*`, `ruff check .`, suíte `pytest` completa (gate de cobertura de 85% herdado do `pyproject.toml`) e publicação de `reports/junit.xml`, `reports/coverage.xml` e `htmlcov/` como artefatos.
+- **Job `docker-build`:** `docker build -t synapseshop-api:test .` para validar o Dockerfile multistage e o empacotamento da imagem da API.
+- **Ambiente de CI:** `DATABASE_URL` para o serviço PostgreSQL; `DJANGO_SECRET_KEY` lido de `secrets` com fallback efêmero; `DJANGO_DEBUG`, `MENSAGERIA_BROKER` e `ASK_SQL_*` fixados.
+- **Ruff pinado:** `ruff==0.16.8` no `requirements-dev.txt`, garantindo o mesmo linter no host, no container de testes e no CI.
+- **Relatórios locais:** `reports/` no `.gitignore`.
+
+### Documentação
+- **README:** badge de status do workflow e seção “Pipeline de CI/CD com GitHub Actions (Aula 22)” com triggers, jobs, variáveis/segredos, equivalente local e limites.
+- **`docs/aulas/22-ci-cd.md`:** arquitetura do pipeline, PostgreSQL efêmero, isolamento de Redis/brokers e roteiro de reprodução.
+- **`specs/README.md`:** índice da Aula 22.
+- **`PROMPTS.md`:** registro do uso de IA na especificação e implementação do workflow.
+
+### Notas
+- Deploy contínuo, publicação em registry (DockerHub/GHCR) e cache avançado de dependências ficam para a Aula 23.
+
 ## [1.21.0] - 2026-10-28 — Consulta de Dados em Linguagem Natural (Texto-para-SQL)
 
 ### Adicionado

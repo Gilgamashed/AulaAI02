@@ -72,3 +72,20 @@
   - Execução: `SET TRANSACTION READ ONLY` + `set_config('statement_timeout', ...)` + `fetchmany(max+1)` para detectar truncamento.
 - **Resultado/Decisão:** criados `api/core/ask_sql/*`, `api/core/llm/mock_sql.py`, `dashboard/ask_sql.py`, `dashboard/pages/3_Consulta_em_Linguagem_Natural.py` e `docs/aulas/21-consulta-linguagem-natural.md`; atualizados `core/llm/servico.py` (fábrica por tarefa), `core/urls.py`, `api/config/settings.py`, `docker-compose.yml`, `.env.example`, `pyproject.toml`, `docs/openapi.yaml`, `README.md`, `docs/CHANGELOG.md` e `specs/README.md`. Suíte: 398 testes, cobertura 89,64%.
 - **Revisão humana/ajuste manual:** o mock devolve `NAO_SUPORTADO` para perguntas fora dos padrões; o campo `question` recusa tipos não textuais (o `CharField` do DRF converte `42` em `"42"`); a transação read-only é provada com `django_db(transaction=True)`; as páginas Streamlit ficaram fora da cobertura porque executam UI no import (a lógica testável está em `dashboard/ask_sql.py`).
+
+## [2026-10-30] Aula 22 - Pipeline de CI/CD com GitHub Actions
+
+- **Ferramenta:** opencode (DeepSeek V4.1 Flash Free).
+- **Contexto:** Spec `specs/spec_da_aula_22.md` - criar `.github/workflows/ci.yml` com checkout, setup do Python, instalação de dependências, lint, `pytest` e build da imagem Docker; configurar triggers em `main`/`master`/PR/manual; abstrair variáveis e segredos; atualizar README com badge e registrar o uso de IA.
+- **Prompt do usuário:** "Estou estudando programação avançada com IA e hoje estamos na aula 22. Vamos seguir as tarefas e responsabilidades da spec @specs/spec_da_aula_22.md para que os itens do seu DoD sejam concluidos." Em seguida: "vamos executar".
+- **Decisões:**
+  - **PostgreSQL 16 como service container** no job `test-and-lint`: o `pytest-django` cria/destrói um banco `test_*`, então SQLite quebraria a paridade com produção. Redis, Kafka e RabbitMQ continuam fora porque `settings_test` usa `LocMemCache` e o `conftest` substitui a publicação de eventos por um duplo em memória.
+  - **Ruff pinado no `requirements-dev.txt`** (`ruff==0.16.8`), e não instalado solto no YAML: o mesmo binário roda no host, no container de testes e no CI.
+  - **Push também em `dev`**, além de `main`/`master`: é o branch de integração do curso; sem isso a pipeline só rodaria após PR/merge. O badge continua apontando para `main`.
+  - **`DJANGO_SECRET_KEY` com fallback efêmero** (`secrets.DJANGO_SECRET_KEY || 'ci-insecure-synapseshop'`): a CI não depende de configuração manual para nascer verde, mas consome o secret quando ele existe.
+  - **Jobs em paralelo** (`test-and-lint` e `docker-build`), sem `needs`: a spec permite fases paralelas e o build da imagem não depende do resultado dos testes.
+  - **Relatórios como artefatos** (`junit.xml`, `coverage.xml`, `htmlcov/`) com `actions/upload-artifact@v4` e `if: always()`, para diagnóstico mesmo em falha.
+  - **Sem cache de pip, sem registry e sem deploy:** a spec reserva essas etapas para a Aula 23.
+- **Resultado/Decisão:** criados `.github/workflows/ci.yml` e `docs/aulas/22-ci-cd.md`; atualizados `requirements-dev.txt`, `README.md` (badge + seção), `docs/CHANGELOG.md` (1.22.0), `specs/README.md`, `.gitignore` (`reports/`) e `PROMPTS.md`. O workflow usa `actions/checkout@v4`, `actions/setup-python@v5`, `actions/upload-artifact@v4`, `permissions: contents: read` e `workflow_dispatch`.
+- **Revisão humana/ajuste manual:** nenhum segredo real foi versionado; as credenciais do Postgres do runner são descartáveis. O token ativo do `gh` não tinha permissão em `actions/secrets` (HTTP 403), então o cadastro do `DJANGO_SECRET_KEY` ficou documentado no README e é opcional — o fallback cobre a ausência.
+- **Validação:** `ruff check .` verde no host e no container; suíte completa com o comando do CI (`--junitxml` + `--cov-report=xml`) em 398 testes e cobertura de 89,64%; `docker build -t synapseshop-api:test .` concluído; YAML aprovado pelo `actionlint`; `docker compose config --quiet` sem erros.
