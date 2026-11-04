@@ -1,0 +1,19 @@
+# =====================================================================
+# Override EXCLUSIVO do job `compose-smoke` (.github/workflows/ci.yml).
+#
+# A imagem da API já foi construída pelo passo `docker/build-push-action`
+# com cache no GitHub Actions e carregada no daemon do runner como
+# `synapseshop-api:ci`. O `!reset null` remove o `build:` herdado do
+# docker-compose.yml para que o Compose use essa imagem em vez de
+# reconstruí-la sem cache.
+#
+# Requer Docker Compose >= 2.24.4 (suporte ao tag `!reset`).
+# Uso local (opcional):
+#   docker buildx build --load -t synapseshop-api:ci .
+#   docker compose -f docker-compose.yml -f .github/compose.ci.yml up -d \
+#     db api dashboard
+# =====================================================================
+services:
+  api:
+    image: synapseshop-api:ci
+    build: !reset null

@@ -23,6 +23,7 @@ docker compose up -d --build          # ambiente completo (api :8000, inventory 
 docker compose run --rm tests         # suíte pytest com gate de cobertura (85%)
 docker compose exec api python api/manage.py seed_auth   # usuários demo
 docker compose run --rm dashboard python -m dashboard.simular_sqli  # simulação SQLi
+python scripts/validar_compose.py     # smoke de db/api/dashboard (stack já no ar)
 python -m ruff check .                # lint
 python -m mypy api services dashboard # verificação de tipos
 python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
@@ -36,7 +37,9 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 - `tests/` — `unit/` e `integration/` (pytest + pytest-django)
 - `specs/` — specs incrementais por aula (fonte de requisitos)
 - `docs/` — autenticação, contratos de evento, OpenAPI, changelog, aulas
-- `scripts/` — medições de cache/mensageria e lint do OpenAPI
+- `scripts/` — medições de cache/mensageria, lint do OpenAPI e smoke do Compose
+- `.github/workflows/` — pipeline de CI/CD (testes, build, Compose, DockerHub)
+- `.github/compose.ci.yml` — override do Compose usado pelo job de integração
 - `collections/` — coleções Postman por aula
 - `.opencode/skills/` — skills de papéis (arquitetura-e-squad,
   engenharia-devops, especialista-ia)
@@ -46,6 +49,8 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 - Python 3.12+ (Docker) / 3.14 (venv local); estilo Ruff; tipos via mypy.
 - Sem comentários supérfluos; sem placeholders ansiosos; sem dead code.
 - Segredos **somente** via `.env` (gitignored; `.env.example` documenta).
+- CI/CD: a publicação no DockerHub usa os *repository secrets*
+  `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`; nunca versione os valores.
 - Toda decisão relevante fica registrada: specs, `README.md`,
   `docs/CHANGELOG.md` e `PROMPTS.md` (uso de IA).
 - Contratos: eventos em `docs/contracts/` + `api/core/messaging/contracts.py`;
@@ -54,7 +59,9 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 
 ## Validação obrigatória antes de entregar
 
-1. `docker compose run --rm tests` verde (222+ testes, cobertura >= 85%).
+1. `docker compose run --rm tests` verde (398+ testes, cobertura >= 85%).
 2. `ruff check .` sem erros.
 3. `mypy api services` sem novos erros.
 4. OpenAPI coerente com as rotas alteradas.
+5. Ao mexer em Compose/CI: `docker compose up -d --build db api dashboard` +
+   `python scripts/validar_compose.py` verdes.

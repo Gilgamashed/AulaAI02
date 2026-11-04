@@ -230,6 +230,7 @@ mantém o estado atual do projeto e o índice para navegação.
 | 20 | Dashboard de desempenho da API | [docs/aulas/20-desempenho.md](docs/aulas/20-desempenho.md) |
 | 21 | Consulta em linguagem natural (texto-para-SQL) | [docs/aulas/21-consulta-linguagem-natural.md](docs/aulas/21-consulta-linguagem-natural.md) |
 | 22 | Pipeline de CI/CD com GitHub Actions | [docs/aulas/22-ci-cd.md](docs/aulas/22-ci-cd.md) |
+| 23 | Pipeline avançado: cache, Compose e deploy simulado | [docs/aulas/23-ci-cd-avancado.md](docs/aulas/23-ci-cd-avancado.md) |
 
 ## Documentação útil
 
@@ -465,7 +466,7 @@ DASHBOARD_API_URL=http://api:8000
 Documentação técnica e roteiro de teste:
 [docs/aulas/21-consulta-linguagem-natural.md](docs/aulas/21-consulta-linguagem-natural.md).
 
-## Pipeline de CI/CD com GitHub Actions (Aula 22)
+## Pipeline de CI/CD com GitHub Actions (Aulas 22–23)
 
 O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda a cada
 push em `main`, `master` e `dev`, em pull requests para o branch principal e
@@ -476,50 +477,130 @@ para `?branch=main`.
 | Job | Runner | O que valida |
 | --- | --- | --- |
 | `test-and-lint` | `ubuntu-latest` | `ruff check .`, suíte `pytest` completa e gate de cobertura de 85% |
-| `docker-build` | `ubuntu-latest` | `docker build -t synapseshop-api:test .` (Dockerfile multistage) |
+| `docker-build` | `ubuntu-latest` | buildx com cache de camadas, imagem `synapseshop-api:test` e `docker image inspect` |
+| `compose-smoke` | `ubuntu-latest` | sobe `db`, `api` e `dashboard` com `--wait` e roda o smoke de comunicação |
+| `publish` | `ubuntu-latest` | login e push da imagem no DockerHub, com verificação do digest |
+
+`publish` depende dos três anteriores (`needs`): teste, build ou integração
+vermelhos bloqueiam a publicação. Ele só executa em push para
+`main`/`master`/`dev` ou em execução manual — PRs nunca publicam.
 
 A suíte não usa Redis, Kafka nem RabbitMQ: `config.settings_test` troca os
 caches por `LocMemCache` e o `tests/conftest.py` substitui a publicação de
-eventos por um duplo em memória. O único serviço externo é um PostgreSQL 16
-efêmero, porque o `pytest-django` cria e destrói o banco `test_*`.
+eventos por um duplo em memória. O único serviço externo do job de testes é
+um PostgreSQL 16 efêmero, porque o `pytest-django` cria e destrói o banco
+`test_*`.
+
+### Cache de dependências e imagens
+
+- **Pip:** `actions/setup-python@v5` com `cache: pip` e
+  `cache-dependency-path` para os quatro arquivos de requirements. A chave é
+  o hash desses arquivos; mudou uma dependência, o cache é renovado.
+- **Docker:** `docker/setup-buildx-action@v3` +
+  `docker/build-push-action@v6` com
+  `cache-from: type=gha,scope=synapseshop-api` e
+  `cache-to: type=gha,mode=max`. O `mode=max` também guarda as camadas
+  intermediárias do builder multistage (a instalação do pip).
+- Os jobs `docker-build`, `compose-smoke` e `publish` compartilham o mesmo
+  escopo de cache. O primeiro run com cache frio é mais lento; os seguintes
+  mostram `CACHED` e tempos menores no log do build.
+
+### Integração com Docker Compose
+
+O job `compose-smoke` constrói a API com o cache GHA, carrega a imagem como
+`synapseshop-api:ci` e usa o override
+[`.github/compose.ci.yml`](.github/compose.ci.yml) para que o Compose não a
+reconstrua. Depois sobe `db`, `api` e `dashboard` (o `redis` entra como
+dependência saudável da API) e executa:
+
+```bash
+python scripts/validar_compose.py
+```
+
+O script valida os cinco caminhos que importam: host → API, host → dashboard,
+API → PostgreSQL, dashboard → PostgreSQL e dashboard → API (pelo nome do
+serviço, dentro da rede do Compose). Em falha, imprime `docker compose ps` e
+as últimas 120 linhas dos logs.
+
+### Deploy simulado no DockerHub
+
+Em push para `main`/`master`/`dev` (ou dispatch), o job `publish`:
+
+1. confere se `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN` existem;
+2. faz login com `docker/login-action@v3`;
+3. calcula as tags com `docker/metadata-action@v5`;
+4. envia a imagem com `docker/build-push-action@v6` (`push: true`);
+5. confere o digest com `docker buildx imagetools inspect`.
+
+Tags: `sha-<sha completo>` (rastreabilidade e rollback), a tag do branch
+(`dev`, `main`, `master`) e `latest` somente no branch padrão. Se os secrets
+não existirem, o job emite um aviso e marca a publicação como ignorada em
+vez de ficar vermelho em forks/PRs.
 
 ### Variáveis e segredos
 
-Nenhum segredo é obrigatório: o banco do runner é descartável e
-`config.settings_test` fixa `SECRET_KEY` e `JWT_SIGNING_KEY`. O workflow lê
-`secrets.DJANGO_SECRET_KEY` quando ele existe e cai num valor efêmero de CI
-quando não existe — assim um fork ou um PR sem acesso a secrets também roda.
+| Nome | Origem | Obrigatório? |
+| --- | --- | --- |
+| `DATABASE_URL` | definido no workflow | sim (banco do job de testes) |
+| `DJANGO_SECRET_KEY` | `secrets.DJANGO_SECRET_KEY` com fallback efêmero | não |
+| `POSTGRES_USER/PASSWORD/DB` | definidos no job `compose-smoke` | sim (Compose) |
+| `DOCKERHUB_USERNAME` | secret do repositório | sim (publicação) |
+| `DOCKERHUB_TOKEN` | secret do repositório (Read & Write) | sim (publicação) |
 
-Para cadastrar o segredo (opcional):
+Cadastro dos segredos do DockerHub (o `GITHUB_TOKEN` do ambiente pode ser um
+PAT sem permissão para `actions/secrets`; o keyring tem):
 
-```bash
-gh secret set DJANGO_SECRET_KEY --repo Gilgamashed/AulaAI02
+```powershell
+$env:GITHUB_TOKEN = $null
+
+gh secret set DOCKERHUB_USERNAME --repo Gilgamashed/AulaAI02 --body "SEU_USUARIO_DOCKERHUB"
+gh secret set DOCKERHUB_TOKEN --repo Gilgamashed/AulaAI02
+
+gh secret list --repo Gilgamashed/AulaAI02
 ```
 
-Ou em **Settings → Secrets and variables → Actions → New repository secret**.
-O mesmo painel serve para variáveis não sensíveis (`vars.*`), que não são
-necessárias nesta aula.
+O token é criado em **DockerHub → Account Settings → Security → New Access
+Token** com escopo **Read & Write**. O valor nunca entra no repositório, no
+`.env.example` ou no log — o `gh` só exibe nome e data.
+
+### Monitorização, falhas e rollback
+
+- **Logs e tempos:** aba **Actions** → run → job → step. O log do build
+  mostra `CACHED` quando a camada veio do cache.
+- **Status checks:** em **Settings → Branches**, marque
+  `Testes e lint`, `Build da imagem Docker` e `Integração com Docker Compose`
+  como obrigatórios em PRs. Não marque `publish` (ele não roda em PR).
+- **Falhas propositadas:** YAML inválido não agenda o run; lint/teste
+  vermelho bloqueia o `publish`; variável do Postgres ausente faz o `--wait`
+  estourar; segredo ausente gera aviso e skip. A tabela completa está em
+  [docs/aulas/23-ci-cd-avancado.md](docs/aulas/23-ci-cd-avancado.md).
+- **Rollback:** como cada push publica a tag imutável `sha-<completo>`, basta
+  apontar o consumidor para a tag anterior. Não é preciso reconstruir o
+  código antigo.
 
 ### Rodar o equivalente local
 
-```bash
-docker compose build tests            # instala as dependências de dev (inclui ruff)
-docker compose run --rm tests         # pytest + cobertura (gate de 85%)
-docker compose run --rm tests python -m ruff check .
+```powershell
+# Lint e suíte
+python -m ruff check .
+docker compose run --rm tests
+
+# Build da imagem da API
 docker build -t synapseshop-api:test .
+
+# Smoke do Compose (sobe banco, API e painel e valida a comunicação)
+docker compose up -d --build --wait db api dashboard
+python scripts/validar_compose.py
+
+# Parar sem apagar o volume pgdata (NUNCA use `down -v` localmente)
+docker compose stop db api dashboard
 ```
 
 O job publica `reports/junit.xml`, `reports/coverage.xml` e `htmlcov/` como
 artefatos (`relatorios-testes`, retenção de 7 dias), mesmo quando a suíte
 falha.
 
-### Limites desta aula
-
-Deploy contínuo, publicação de imagem em registry (DockerHub/GHCR) e cache
-avançado de dependências ficam para a Aula 23. O job `docker-build` apenas
-prova que a imagem constrói localmente no runner.
-
-Documentação técnica: [docs/aulas/22-ci-cd.md](docs/aulas/22-ci-cd.md).
+Documentação técnica: [docs/aulas/23-ci-cd-avancado.md](docs/aulas/23-ci-cd-avancado.md).
 
 ## Referências
 

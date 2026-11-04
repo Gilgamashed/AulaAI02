@@ -31,6 +31,7 @@ spec; a implementação deve satisfazer apenas a spec da aula corrente (ver
 | 20 | [Dashboard de Desempenho da API em Streamlit](spec_da_aula_20.md) |
 | 21 | [Consulta de Dados em Linguagem Natural (Texto-para-SQL)](spec_da_aula_21.md) |
 | 22 | [Pipeline de CI/CD com GitHub Actions](spec_da_aula_22.md) |
+| 23 | [Pipeline de CI/CD Avançado: Cache, Docker Compose e Deploy Simulado](specs_da_aula_23.md) |
 
 ## Relacionados
 

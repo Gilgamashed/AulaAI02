@@ -1,14 +1,18 @@
 # =====================================================================
-# SynapseShop — Integração Contínua (Aula 22)
+# SynapseShop — Integração e Entrega Contínua (Aulas 22–23)
 #
 # O que este workflow garante a cada push/PR:
 #   1. O código passa no lint (ruff na versão pinada em requirements-dev.txt).
 #   2. A suíte completa roda contra um PostgreSQL real e derruba o pipeline
 #      se um teste quebrar — inclusive o gate de cobertura de 85% dos addopts.
-#   3. A imagem Docker da API continua construindo (empacotamento íntegro).
+#   3. A imagem Docker da API constrói com cache de camadas no GitHub Actions.
+#   4. db + api + dashboard sobem juntos pelo Docker Compose e são validados
+#      por um smoke test de comunicação entre os serviços.
+#   5. Em push para main/master/dev (ou dispatch), a imagem é publicada no
+#      DockerHub — o "deploy simulado" da Aula 23.
 #
-# Fora de escopo (Aula 23): deploy, publicação em registry e cache avançado
-# de dependências.
+# Decisões, cenários de falha e roteiro de rollback:
+# docs/aulas/23-ci-cd-avancado.md.
 # =====================================================================
 name: CI
 
@@ -19,9 +23,22 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+# Cancelar apenas PRs antigos: um push que já começou a publicar no
+# DockerHub não é interrompido no meio do `docker push`.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Menor privilégio: o workflow só lê o repositório para checkout/build.
 permissions:
   contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  IMAGE_NAME: synapseshop-api
+  # Escopo compartilhado pelos três jobs que constroem a imagem: o cache
+  # gravado em um é lido pelo seguinte (type=gha, backend do GitHub Actions).
+  DOCKER_CACHE_SCOPE: synapseshop-api
 
 jobs:
   test-and-lint:
@@ -67,7 +84,16 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
+          # Cache dos pacotes Python entre execuções. A chave é o hash dos
+          # arquivos abaixo; a lista precisa incluir também os requirements
+          # referenciados por `-r` dentro do requirements-dev.txt.
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            services/inventory/requirements.txt
+            dashboard/requirements.txt
 
       - name: Instalar dependências
         run: |
@@ -105,10 +131,187 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build da imagem da API
-        # Mesma tag do DoD: valida o Dockerfile multistage e o empacotamento
-        # sem precisar de banco, Redis ou broker (o CMD só roda no runtime).
-        run: docker build --tag synapseshop-api:test .
+      - name: Configurar Buildx
+        # O driver docker-container é o que suporta exportar o cache para o
+        # backend `type=gha` e carregar a imagem no daemon do runner.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Construir a imagem da API
+        # `mode=max` guarda também as camadas intermediárias do builder
+        # multistage (a instalação do pip), não só a camada final.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: synapseshop-api:test
+          cache-from: type=gha,scope=${{ env.DOCKER_CACHE_SCOPE }}
+          cache-to: type=gha,mode=max,scope=${{ env.DOCKER_CACHE_SCOPE }}
 
       - name: Confirmar imagem criada
         run: docker image inspect synapseshop-api:test --format '{{.Id}}'
+
+  compose-smoke:
+    name: Integração com Docker Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Espera o build terminar para reaproveitar o cache GHA no build da API
+    # e para não validar a integração de uma imagem que nem construiu.
+    needs: docker-build
+
+    env:
+      # Nome fixo do projeto para os comandos `docker compose exec` do smoke
+      # encontrarem os mesmos containers subidos neste job.
+      COMPOSE_PROJECT_NAME: synapseshop
+      # O Compose monta o DATABASE_URL da API a partir destas variáveis.
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: synapse
+      POSTGRES_DB: synapse
+      DJANGO_SECRET_KEY: ci-insecure-synapseshop
+      DJANGO_DEBUG: "False"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Construir a imagem da API com cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: synapseshop-api:ci
+          cache-from: type=gha,scope=${{ env.DOCKER_CACHE_SCOPE }}
+          cache-to: type=gha,mode=max,scope=${{ env.DOCKER_CACHE_SCOPE }}
+
+      - name: Subir db, api e dashboard
+        # O override reaproveita a imagem recém-construída; banco, painel e
+        # Redis são criados pelo caminho normal do Compose. `--wait` só
+        # devolve sucesso quando todos os healthchecks estiverem verdes.
+        run: >-
+          docker compose
+          -f docker-compose.yml
+          -f .github/compose.ci.yml
+          up -d --wait --wait-timeout 300 db api dashboard
+
+      - name: Validar comunicação entre os serviços
+        run: python scripts/validar_compose.py
+
+      - name: Diagnóstico em caso de falha
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml -f .github/compose.ci.yml ps
+          docker compose -f docker-compose.yml -f .github/compose.ci.yml logs \
+            --no-color --tail=200 db api dashboard
+
+      - name: Derrubar ambiente
+        if: always()
+        run: >-
+          docker compose
+          -f docker-compose.yml
+          -f .github/compose.ci.yml
+          down -v --remove-orphans || true
+
+  publish:
+    name: Publicação no DockerHub (deploy simulado)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Só publica código que passou por lint/testes, build e integração.
+    needs: [test-and-lint, docker-build, compose-smoke]
+    # Push nos branches de integração ou execução manual. PRs nunca publicam.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/master' ||
+      github.ref == 'refs/heads/dev'))
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verificar segredos do DockerHub
+        id: creds
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        # O segredo é write-only: não há como validar o valor antes do login.
+        # Sem os dois, o job avisa e ignora a publicação em vez de ficar
+        # vermelho em forks/PRs que não têm acesso aos secrets.
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Deploy simulado ignorado::Cadastre DOCKERHUB_USERNAME e DOCKERHUB_TOKEN nos secrets do repositório."
+          fi
+
+      - name: Configurar Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login no DockerHub
+        if: steps.creds.outputs.enabled == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Calcular tags e labels
+        id: meta
+        if: steps.creds.outputs.enabled == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Publicar imagem
+        id: push
+        if: steps.creds.outputs.enabled == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ env.DOCKER_CACHE_SCOPE }}
+          cache-to: type=gha,mode=max,scope=${{ env.DOCKER_CACHE_SCOPE }}
+          # Evita o manifesto de proveniência nesta simulação: o objetivo é
+          # provar o push e o pull por tag, não attestations de supply chain.
+          provenance: false
+
+      - name: Confirmar digest publicado
+        if: steps.creds.outputs.enabled == 'true'
+        run: >-
+          docker buildx imagetools inspect
+          "${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}"
+
+      - name: Resumo do deploy simulado
+        if: always()
+        env:
+          PUBLICADO: ${{ steps.creds.outputs.enabled }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "### Deploy simulado (DockerHub)"
+            echo ""
+            if [ "$PUBLICADO" = "true" ]; then
+              echo "- Status: **publicado**"
+              echo "- Digest: \`$DIGEST\`"
+              echo "- Tags:"
+              echo '```'
+              echo "$TAGS"
+              echo '```'
+            else
+              echo "- Status: **ignorado** (segredos \`DOCKERHUB_USERNAME\`/\`DOCKERHUB_TOKEN\` ausentes)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

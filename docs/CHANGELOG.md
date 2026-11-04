@@ -5,6 +5,33 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.23.0] - 2026-11-04 — Pipeline de CI/CD Avançado: Cache, Compose e Deploy Simulado
+
+### Adicionado
+- **Cache de dependências Python (Aula 23):** `actions/setup-python@v5` com `cache: pip` e `cache-dependency-path` cobrindo `requirements.txt`, `requirements-dev.txt`, `services/inventory/requirements.txt` e `dashboard/requirements.txt`.
+- **Cache de camadas Docker:** `docker/setup-buildx-action@v3` + `docker/build-push-action@v6` com `cache-from/cache-to: type=gha` e `mode=max`, no escopo compartilhado `synapseshop-api` entre os jobs de build, integração e publicação.
+- **Job `compose-smoke`:** constrói a imagem da API com cache, carrega `synapseshop-api:ci`, sobe `db`, `api` e `dashboard` com `docker compose up -d --wait` e valida a comunicação entre os serviços.
+- **Script `scripts/validar_compose.py`:** smoke test com cinco caminhos (host→API, host→dashboard, API→PostgreSQL, dashboard→PostgreSQL e dashboard→API), diagnóstico automático de `ps`/logs e execução multiplataforma (stdlib).
+- **Override `.github/compose.ci.yml`:** aponta a API para a imagem pré-construída e remove o `build` com `!reset null`, reaproveitando o cache GHA.
+- **Job `publish` (deploy simulado):** login com `docker/login-action@v3`, tags via `docker/metadata-action@v5` (`sha-<completo>`, branch e `latest` no branch padrão), push com `docker/build-push-action@v6`, verificação do digest com `imagetools inspect` e resumo no `$GITHUB_STEP_SUMMARY`.
+- **Guarda de segredos:** ausência de `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` gera warning e publicação ignorada, mantendo PRs e forks verdes.
+- **Cache mount do pip no `dashboard/Dockerfile`**, alinhando o painel ao padrão de cache dos demais Dockerfiles.
+
+### Alterado
+- **`.github/workflows/ci.yml`:** gatilhos mantidos; adicionados `concurrency` (cancela apenas PRs antigos), `docker-build` com Buildx/cache, `compose-smoke` com `needs: docker-build` e `publish` com `needs` dos três jobs anteriores.
+- **`README.md`:** seção de CI/CD reescrita para o estado das Aulas 22–23 (cache, Compose, DockerHub, segredos, monitorização, rollback e comandos locais).
+- **`specs/README.md`:** índice da Aula 23.
+- **`AGENTS.md`:** comando de smoke do Compose e validação correspondente.
+
+### Documentação
+- **`docs/aulas/23-ci-cd-avancado.md`:** arquitetura dos jobs, estratégia de cache, serviços do Compose, deploy simulado, cadastro de segredos, monitorização, tabela de falhas propositadas e rollback por tag.
+- **`PROMPTS.md`:** registro do uso de IA na especificação e implementação da Aula 23.
+
+### Notas
+- O `!reset` do override exige Docker Compose >= 2.24.4.
+- O deploy continua simulado: a imagem é publicada no DockerHub, mas nenhum ambiente de produção é provisionado.
+- Apenas a imagem da API é publicada; dashboard e inventory são construídos somente no Compose.
+
 ## [1.22.0] - 2026-10-30 — Pipeline de CI/CD com GitHub Actions
 
 ### Adicionado

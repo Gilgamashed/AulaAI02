@@ -10,7 +10,11 @@ WORKDIR /app
 RUN useradd --create-home --shell /bin/bash appuser
 
 COPY dashboard/requirements.txt ./requirements.txt
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Cache mount do BuildKit (mesmo padrão do Dockerfile da API): os downloads
+# do pip ficam fora da imagem e são reutilizados entre builds.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip \
+    && pip install -r requirements.txt
 
 COPY --chown=appuser:appuser dashboard ./dashboard
 
