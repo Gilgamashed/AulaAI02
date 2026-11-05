@@ -1,0 +1,5 @@
+# Scripts .sh rodam dentro de containers Linux. Com `core.autocrlf=true` no
+# Windows, um checkout os entregaria com CRLF e o kernel não encontraria o
+# interpretador em "#!/bin/sh\r". Fixar LF mantém o comportamento igual em
+# qualquer máquina — inclusive na imagem Docker do banco.
+*.sh text eol=lf

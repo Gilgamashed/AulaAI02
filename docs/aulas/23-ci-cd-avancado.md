@@ -227,6 +227,43 @@ watchers; um run cancelado por `concurrency` não é falha.
 | Segredos do DockerHub ausentes | `publish` emite warning e marca "ignorado"; o run fica verde | Cadastrar `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN` |
 | Token do DockerHub inválido/sem escrita | O login ou o push falham no `publish`; os jobs anteriores continuam verdes | Gerar novo token com Read & Write e atualizar o secret |
 
+### Diagnóstico do primeiro run real
+
+O primeiro run do job `compose-smoke` falhou no `docker compose up --wait`:
+
+```text
+dependency failed to start: container synapseshop_api is unhealthy
+```
+
+O passo de diagnóstico (`if: failure()`) mostrou a causa real nos logs da API:
+
+```text
+psycopg.OperationalError: connection failed: server does not support SSL,
+but SSL was required
+```
+
+O banco subia saudável porque o healthcheck usa `pg_isready` (sem TLS), mas o
+script `docker/postgres/init-ssl.sh` falhava no primeiro start do volume:
+
+- `openssl req ... -key server.key` **lê** uma chave existente em vez de
+  criá-la; no volume novo o arquivo ainda não existia e o comando abortava;
+- o `ssl` nunca era ligado e a API, que exige `sslmode=require`, morria no
+  `migrate` do entrypoint;
+- localmente o bug ficava escondido porque o container do banco já tinha
+  certificados de uma execução anterior.
+
+Correções aplicadas (detalhadas no `CHANGELOG`):
+
+1. geração com `-newkey rsa:2048 -keyout ...` (idempotente);
+2. certificados em `$PGDATA/certs`, dentro do volume;
+3. `docker-entrypoint-wrapper.sh` garante TLS também quando o volume já está
+   inicializado e reescreve caminhos antigos;
+4. `CMD ["postgres"]` redeclarado no Dockerfile do banco (definir `ENTRYPOINT`
+   zera o `CMD` herdado).
+
+Depois da correção, o mesmo caminho do CI foi reproduzido localmente com um
+volume novo (`COMPOSE_PROJECT_NAME=aula23ci`) e passou nas 5 verificações.
+
 ### Rollback
 
 Não existe ambiente de produção nesta simulação. O mecanismo de rollback é

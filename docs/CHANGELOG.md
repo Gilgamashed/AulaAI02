@@ -23,6 +23,11 @@ codifica retroativamente o histórico das aulas anteriores.
 - **`specs/README.md`:** índice da Aula 23.
 - **`AGENTS.md`:** comando de smoke do Compose e validação correspondente.
 
+### Corrigido
+- **TLS do PostgreSQL em volume novo (Aula 19, exposto pelo job `compose-smoke`):** `docker/postgres/init-ssl.sh` gerava o certificado com `-key` (que tenta ler uma chave existente) em vez de `-newkey`/`-keyout`; em um volume recém-criado o `openssl` falhava, o `ssl` ficava desligado e a API morria com `server does not support SSL, but SSL was required`. O script agora gera a chave corretamente e é idempotente.
+- **Certificados dentro do `PGDATA`:** antes ficavam em `/var/lib/postgresql/certs`, fora do volume — recriar o container apagava os arquivos e o `postgresql.conf` persistido apontava para chaves inexistentes. Agora ficam em `$PGDATA/certs` e sobrevivem à recriação.
+- **Wrapper de entrypoint (`docker-entrypoint-wrapper.sh`):** garante TLS em todo start, inclusive em volumes já inicializados (onde o `/docker-entrypoint-initdb.d` não roda) e em volumes de versões anteriores com caminhos antigos; reescreve o bloco TLS e as linhas `hostssl` em vez de só anexar. O `CMD ["postgres"]` foi redeclarado porque definir `ENTRYPOINT` zera o `CMD` herdado da imagem base.
+
 ### Documentação
 - **`docs/aulas/23-ci-cd-avancado.md`:** arquitetura dos jobs, estratégia de cache, serviços do Compose, deploy simulado, cadastro de segredos, monitorização, tabela de falhas propositadas e rollback por tag.
 - **`PROMPTS.md`:** registro do uso de IA na especificação e implementação da Aula 23.
