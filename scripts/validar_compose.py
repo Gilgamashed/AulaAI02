@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os  # falha proposital do drill de CI (será revertida)
 import subprocess
 import sys
 import time
