@@ -316,6 +316,18 @@ python scripts/validar_compose.py
 - Primeiro run com cache frio é mais lento; os seguintes devem mostrar
   `CACHED` no build e tempos menores de instalação de dependências.
 
+### Resultado observado
+
+| Run | Evento | Resultado |
+| --- | --- | --- |
+| [41937956794](https://github.com/Gilgamashed/AulaAI02/actions/runs/41937956794) | push `dev` (1º) | `test-and-lint` e `docker-build` verdes; `compose-smoke` vermelho por SSL; `publish` skipped |
+| [41940296490](https://github.com/Gilgamashed/AulaAI02/actions/runs/41940296490) | push `dev` (correção) | 4 jobs verdes; imagem publicada com tags `dev` e `sha-04d24b9…` e digest `sha256:1934bc34…` |
+| [41940892539](https://github.com/Gilgamashed/AulaAI02/actions/runs/41940892539) | PR #15 (drill) | `test-and-lint` vermelho no lint, `compose-smoke` verde, `publish` skipped |
+
+O drill do PR #15 foi fechado sem merge, com a branch apagada. Ele prova o
+bloqueio: o job de publicação tem `needs` dos três anteriores e o GitHub não
+o agenda quando qualquer dependência falha.
+
 ## Limitações registradas
 
 - **Deploy simulado:** o push no DockerHub não provisiona um ambiente. Não
