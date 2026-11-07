@@ -71,6 +71,17 @@ def _estado_limpo():
     _zerar()
 
 
+@pytest.fixture(autouse=True)
+def _indice_rag_isolado(tmp_path, settings):
+    """Aponta o índice RAG para um arquivo temporário por teste.
+
+    Sem isso, um teste que chamasse `/ask_docs/` sem sobrescrever o caminho
+    gravaria em `data/rag_index.sqlite3`, contaminando a próxima execução e o
+    repositório. O `tmp_path` é criado e destruído pelo pytest.
+    """
+    settings.ASK_DOCS_INDEX_PATH = str(tmp_path / "rag_index.sqlite3")
+
+
 # =====================================================================
 # Mocks de broker (autouse)
 # =====================================================================
