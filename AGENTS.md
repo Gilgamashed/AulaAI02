@@ -22,6 +22,7 @@ infraestrutura de aulas futuras. A meta-spec completa está em
 docker compose up -d --build          # ambiente completo (api :8000, inventory :8001, dashboard :8501)
 docker compose run --rm tests         # suíte pytest com gate de cobertura (85%)
 docker compose exec api python api/manage.py seed_auth   # usuários demo
+docker compose exec api python api/manage.py indexar_docs # índice RAG (README + OpenAPI)
 docker compose run --rm dashboard python -m dashboard.simular_sqli  # simulação SQLi
 python scripts/validar_compose.py     # smoke de db/api/dashboard (stack já no ar)
 python -m ruff check .                # lint
@@ -31,7 +32,8 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 
 ## Estrutura
 
-- `api/` — Django (app `core`, mensageria, LLM, commands, migrations)
+- `api/` — Django (app `core`, mensageria, LLM, RAG em `core/ask_docs/`,
+  commands, migrations)
 - `services/inventory/` — FastAPI + SQLAlchemy/Alembic
 - `dashboard/` — Streamlit (conexão segura, consultas parametrizadas, painel analítico)
 - `tests/` — `unit/` e `integration/` (pytest + pytest-django)

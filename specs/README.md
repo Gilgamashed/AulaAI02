@@ -32,6 +32,7 @@ spec; a implementação deve satisfazer apenas a spec da aula corrente (ver
 | 21 | [Consulta de Dados em Linguagem Natural (Texto-para-SQL)](spec_da_aula_21.md) |
 | 22 | [Pipeline de CI/CD com GitHub Actions](spec_da_aula_22.md) |
 | 23 | [Pipeline de CI/CD Avançado: Cache, Docker Compose e Deploy Simulado](specs_da_aula_23.md) |
+| 24 | [Assistente de Documentação com RAG](specs_da_aula_24.md) |
 
 ## Relacionados
 

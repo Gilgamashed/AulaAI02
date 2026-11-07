@@ -189,6 +189,7 @@ automaticamente no startup (o banco já está saudável via `depends_on`).
 | `/api/v1/items/`               | GET, POST                 | Listar / criar produtos eletrônicos         |
 | `/api/v1/items/{id}/`          | GET, PUT, PATCH, DELETE   | Detalhe / atualizar / excluir produto       |
 | `/api/v1/ask_sql/`             | POST (admin)              | Pergunta em português → SELECT validado     |
+| `/api/v1/ask_docs/`            | POST (admin)              | Pergunta técnica → resposta RAG com fontes  |
 
 Status codes: **200** OK, **201** Created, **204** No Content, **400** Bad
 Request, **404** Not Found. Validações customizadas: preço não-negativo, SKU no
@@ -231,6 +232,7 @@ mantém o estado atual do projeto e o índice para navegação.
 | 21 | Consulta em linguagem natural (texto-para-SQL) | [docs/aulas/21-consulta-linguagem-natural.md](docs/aulas/21-consulta-linguagem-natural.md) |
 | 22 | Pipeline de CI/CD com GitHub Actions | [docs/aulas/22-ci-cd.md](docs/aulas/22-ci-cd.md) |
 | 23 | Pipeline avançado: cache, Compose e deploy simulado | [docs/aulas/23-ci-cd-avancado.md](docs/aulas/23-ci-cd-avancado.md) |
+| 24 | Assistente de documentação com RAG | [docs/aulas/24-rag-documentacao.md](docs/aulas/24-rag-documentacao.md) |
 
 ## Documentação útil
 
@@ -601,6 +603,187 @@ artefatos (`relatorios-testes`, retenção de 7 dias), mesmo quando a suíte
 falha.
 
 Documentação técnica: [docs/aulas/23-ci-cd-avancado.md](docs/aulas/23-ci-cd-avancado.md).
+
+## Assistente de Documentação com RAG (Aula 24)
+
+O endpoint `POST /api/v1/ask_docs/` responde perguntas técnicas com base na
+documentação do projeto. Diferente do `/assist/` (que explica logs) e do
+`/ask_sql/` (que consulta o banco), aqui a resposta vem de um índice **RAG**
+construído a partir do `README.md` e do contrato `docs/openapi.yaml`, e toda
+resposta carrega a citação exata da fonte.
+
+O acesso é restrito ao papel **admin** (`IsAdminRole`), como `/ask_sql/` e
+`/llm/metrics/`: o assistente é operacional e consome a cota de IA.
+
+### Arquitetura
+
+```text
+README.md, docs/openapi.yaml
+        │
+        ▼
+ingestão (hash → chunking ~400/80 → embeddings locais)
+        │
+        ▼
+índice SQLite (documents, chunks, vocabulario)
+        │
+pergunta → embedding → cosseno → top_k + min_score
+        │
+        ▼
+prompt com contexto numerado → provedor de IA → answer + sources
+```
+
+O índice fica em um SQLite separado do banco de negócio (spec pede
+armazenamento leve) e usa duas tabelas principais:
+
+| Tabela | Colunas |
+| --- | --- |
+| `documents` | `doc_id`, `path`, `title`, `hash`, `indexed_at` |
+| `chunks` | `chunk_id`, `doc_id`, `chunk_text`, `start`, `end`, `embedding` (BLOB), `dim` |
+| `vocabulario` | `term`, `idf`, `indice` (apoio interno para a pergunta) |
+
+`path` é o caminho relativo (`README.md`, `docs/openapi.yaml`), `start`/`end`
+são o intervalo de **caracteres** no documento original e `hash` (SHA-256 do
+conteúdo) evita reindexação quando nada mudou.
+
+### Ingestão e parâmetros
+
+- **Fontes padrão:** `README.md` e `docs/openapi.yaml`
+  (`ASK_DOCS_SOURCES`).
+- **Chunking:** ~400 tokens por bloco com ~80 de sobreposição
+  (`ASK_DOCS_CHUNK_TOKENS`, `ASK_DOCS_CHUNK_OVERLAP`). A divisão usa tokens
+  aproximados por espaço em branco; o overlap preserva o contexto nas bordas.
+- **Embeddings:** cálculo **local e determinístico** (TF-IDF com vocabulário
+  exato, vetor normalizado em L2). Não usa rede, chave ou dependência nova.
+- **Reindexação:** o hash por documento decide se o índice precisa ser
+  reconstruído. Quando qualquer fonte muda, o índice inteiro é refeito numa
+  única transação para manter o IDF coerente.
+
+A ingestão roda no startup da API (`python api/manage.py indexar_docs` após
+`migrate`) e grava em `/app/data/rag_index.sqlite3`, preservado pelo volume
+nomeado `rag_data`. Para reindexar manualmente — por exemplo depois de editar
+este README ou o OpenAPI:
+
+```bash
+# Reconstrói o índice (idempotente por hash)
+docker compose exec api python api/manage.py indexar_docs
+
+# Força a reconstrução mesmo sem mudança de conteúdo
+docker compose exec api python api/manage.py indexar_docs --force
+
+# Usar outro arquivo/raiz/fonte
+python api/manage.py indexar_docs \
+  --index-path data/rag_index.sqlite3 \
+  --source README.md --source docs/openapi.yaml
+```
+
+### Recuperação e guardrail
+
+Para cada pergunta o serviço gera o vetor, calcula o cosseno contra todos os
+chunks e mantém os `top_k` blocos com pontuação `>= min_score`. A pontuação
+final de um chunk é o maior cosseno entre o chunk inteiro e as
+frases/parágrafos dentro dele — o chunk continua sendo a unidade de citação,
+mas o ranking enxerga o trecho específico.
+
+Se **nenhum** chunk atingir o limiar, a LLM não é chamada: a resposta é a
+frase padrão de informação não encontrada e `sources` é `[]`. O guardrail é
+aplicado antes do provedor, então não existe resposta inventada sem fonte
+recuperada.
+
+### Exemplo (PowerShell)
+
+```powershell
+$login = Invoke-RestMethod -Method Post `
+  -Uri 'http://localhost:8000/api/v1/auth/token/' `
+  -ContentType 'application/json' `
+  -Body (@{ username='demo_admin'; password='demo-admin@Synapse2026' } | ConvertTo-Json -Compress)
+
+$headers = @{ Authorization = "Bearer $($login.access)" }
+$corpo = @{
+  question  = '<sua pergunta técnica>'
+  top_k     = 3
+  min_score = 0.25
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method Post `
+  -Uri 'http://localhost:8000/api/v1/ask_docs/' `
+  -Headers $headers -ContentType 'application/json' -Body $corpo |
+  ConvertTo-Json -Depth 6
+```
+
+```bash
+# Bash
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token/ \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"demo_admin","password":"demo-admin@Synapse2026"}' |
+  python -c 'import json,sys; print(json.load(sys.stdin)["access"])')
+
+curl -s -X POST http://localhost:8000/api/v1/ask_docs/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"<sua pergunta técnica>","top_k":3,"min_score":0.25}'
+```
+
+Resposta (200):
+
+```json
+{
+  "answer": "As migrações são aplicadas automaticamente no startup (o banco já está saudável via `depends_on`). [1]",
+  "sources": [
+    {
+      "path": "README.md",
+      "title": "SynapseShop",
+      "range": "24658-27472",
+      "score": 0.3213
+    }
+  ]
+}
+```
+
+Pergunta fora do domínio (200, guardrail):
+
+```json
+{
+  "answer": "Não encontrei essa informação na documentação do projeto. Tente reformular a pergunta ou consulte o README.md e o contrato OpenAPI.",
+  "sources": []
+}
+```
+
+Erros: **400** payload inválido (`question` vazia/acima de 500 caracteres,
+`top_k` fora de 1–10, `min_score` fora de 0–1) · **401** sem JWT · **403**
+sem papel admin · **500** IA mal configurada · **502** resposta inválida do
+provedor · **503** índice ausente/indisponível ou provedor fora do ar.
+
+### Limitações registradas
+
+- O provedor desta aula é o **mock determinístico** `ProvedorMockDocs`
+  (mesma porta `ProvedorLlm` da Aula 14): ele extrai a passagem mais
+  relacionada do contexto e a cita. Não é síntese neural; um adaptador real
+  entra pela mesma porta sem mudar índice, recuperação ou contrato.
+- A semântica do embedding é **lexical**. Sinônimos que não compartilham
+  radicais/tokens podem não se aproximar; perguntas fora do vocabulário
+  pontuam zero e caem no guardrail. Um modelo neural de embeddings é a
+  evolução natural quando houver rede/credenciais.
+- Apenas `README.md` e `docs/openapi.yaml` são indexados por padrão. Novas
+  fontes entram em `ASK_DOCS_SOURCES` e exigem reindexação; o escopo não
+  inclui UI de upload nem banco vetorial externo.
+
+### Configuração
+
+```env
+LLM_MODEL_DOCS=mock-docs
+ASK_DOCS_INDEX_PATH=/app/data/rag_index.sqlite3
+ASK_DOCS_SOURCES=README.md,docs/openapi.yaml
+ASK_DOCS_TOP_K=3
+ASK_DOCS_MAX_TOP_K=10
+ASK_DOCS_MIN_SCORE=0.25
+ASK_DOCS_CHUNK_TOKENS=400
+ASK_DOCS_CHUNK_OVERLAP=80
+ASK_DOCS_MAX_TOKENS=600
+ASK_DOCS_LOG_LEVEL=INFO
+```
+
+Documentação técnica e roteiro de teste:
+[docs/aulas/24-rag-documentacao.md](docs/aulas/24-rag-documentacao.md).
 
 ## Referências
 

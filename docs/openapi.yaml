@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: SynapseShop API
-  version: 1.21.0
+  version: 1.24.0
   description: |
-    Documentação OpenAPI do MVP SynapseShop (Aula 21).
+    Documentação OpenAPI do MVP SynapseShop (Aula 24).
 
     Contrato da API principal (`api/` — Django REST Framework) e do
     microsserviço complementar de estoque (`services/inventory/` — FastAPI).
@@ -11,7 +11,9 @@ info:
     A Aula 14 adicionou o assistente de IA (`POST /api/v1/assist/`) e a
     telemetria do provedor (`GET /api/v1/llm/metrics/`). A Aula 21 adicionou a
     consulta em linguagem natural (`POST /api/v1/ask_sql/`): a pergunta vira
-    um `SELECT` validado e executado em transação read-only.
+    um `SELECT` validado e executado em transação read-only. A Aula 24
+    adicionou o assistente de documentação (`POST /api/v1/ask_docs/`): RAG
+    sobre `README.md` e este OpenAPI, com citação obrigatória das fontes.
 
     ## Convenções de contrato
 
@@ -76,6 +78,8 @@ tags:
     description: Telemetria do provedor de IA (admin)
   - name: ask_sql
     description: Consulta de dados em linguagem natural / texto-para-SQL (admin)
+  - name: ask_docs
+    description: Assistente de documentação via RAG com citação de fontes (admin)
   - name: inventory
     description: Microsserviço de estoque (FastAPI)
 
@@ -1112,6 +1116,85 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailableLlm"
+
+  /api/v1/ask_docs/:
+    post:
+      operationId: consultarDocumentacao
+      summary: Responde pergunta técnica com RAG e cita as fontes (Aula 24)
+      description: |
+        Recebe uma pergunta técnica em português, gera o embedding local da
+        pergunta, calcula a similaridade por cosseno contra os chunks
+        indexados e recupera os `top_k` blocos acima de `min_score`. O
+        contexto recuperado (caminho, título, intervalo e trecho) é enviado
+        ao provedor de IA, que responde citando os blocos.
+
+        **Acesso:** JWT obrigatório e papel `admin` — o assistente é
+        operacional e consome a cota de IA.
+
+        **Guardrail:** se nenhum chunk atingir `min_score`, o provedor não é
+        chamado e a resposta informa que a informação não foi encontrada na
+        documentação, com `sources: []`.
+
+        **Fontes:** por padrão apenas `README.md` e `docs/openapi.yaml` são
+        indexados (`ASK_DOCS_SOURCES`). O índice é um SQLite leve
+        (`ASK_DOCS_INDEX_PATH`), reconstruído por
+        `python api/manage.py indexar_docs`.
+
+        **`range`:** intervalo de caracteres `inicio-fim` no documento
+        original; `score` é o cosseno em `[0, 1]`.
+      tags:
+        - ask_docs
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AskDocsRequest"
+            example:
+              question: "<sua pergunta técnica>"
+              top_k: 3
+              min_score: 0.25
+      responses:
+        "200":
+          description: Resposta sintetizada com as fontes recuperadas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AskDocsResponse"
+              examples:
+                encontrado:
+                  summary: Contexto recuperado acima do limiar
+                  value:
+                    answer: >-
+                      As migrações são aplicadas automaticamente no startup
+                      (o banco já está saudável via `depends_on`). [1]
+                    sources:
+                      - path: README.md
+                        title: SynapseShop
+                        range: "24658-27472"
+                        score: 0.3213
+                guardrail:
+                  summary: Nenhum chunk atinge min_score
+                  value:
+                    answer: >-
+                      Não encontrei essa informação na documentação do projeto.
+                      Tente reformular a pergunta ou consulte o README.md e o
+                      contrato OpenAPI.
+                    sources: []
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalServerError"
         "502":
@@ -2290,6 +2373,76 @@ components:
               description: Provedor/modelo efetivo (`mock-sql` no mock da Aula 21).
           required: [tokens_prompt, tokens_output, modelo]
       required: [question, sql, columns, rows, row_count, truncated, meta]
+
+    AskDocsRequest:
+      type: object
+      description: |
+        Entrada do `POST /api/v1/ask_docs/`. `top_k` e `min_score` são
+        opcionais: sem eles valem `ASK_DOCS_TOP_K` (3) e
+        `ASK_DOCS_MIN_SCORE` (0.25).
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Pergunta técnica em linguagem natural.
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 3
+          description: Quantidade de chunks recuperados (teto `ASK_DOCS_MAX_TOP_K`).
+        min_score:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          default: 0.25
+          description: Similaridade mínima de cosseno para um chunk ser usado.
+      required: [question]
+      example:
+        question: "<sua pergunta técnica>"
+        top_k: 3
+        min_score: 0.25
+
+    AskDocsSource:
+      type: object
+      description: Fonte citada, derivada da recuperação (não do texto do modelo).
+      properties:
+        path:
+          type: string
+          description: Caminho relativo da fonte (por exemplo, README.md).
+        title:
+          type: string
+          description: Título legível do documento.
+        range:
+          type: string
+          pattern: "^\\d+-\\d+$"
+          description: Intervalo de caracteres `inicio-fim` no documento original.
+        score:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Similaridade de cosseno do chunk recuperado.
+      required: [path, title, range, score]
+
+    AskDocsResponse:
+      type: object
+      description: |
+        Resposta do assistente de documentação. `sources` é vazio quando o
+        guardrail é acionado: nesse caso `answer` informa que a informação
+        não foi encontrada e nenhum conteúdo é inventado.
+      properties:
+        answer:
+          type: string
+          description: Resposta sintetizada, citando os blocos (`[1]`, `[2]`).
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/AskDocsSource"
+          description: Fontes recuperadas acima de `min_score`, na ordem do ranking.
+      required: [answer, sources]
 
     LlmMetrics:
       type: object

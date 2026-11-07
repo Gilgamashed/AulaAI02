@@ -5,6 +5,31 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.24.0] - 2026-11-06 — Assistente de Documentação com RAG
+
+### Adicionado
+- **Pacote `api/core/ask_docs/` (Aula 24):** pipeline completo de RAG — chunking (~400 tokens, overlap de ~80), embeddings locais determinísticos, índice SQLite, recuperação por cosseno (`top_k`/`min_score`), montagem do prompt e guardrail.
+- **Índice SQLite leve:** tabelas `documents` (`doc_id`, `path`, `title`, `hash`, `indexed_at`) e `chunks` (`chunk_id`, `doc_id`, `chunk_text`, `start`, `end`, `embedding` BLOB, `dim`), mais a tabela interna `vocabulario` (`term`, `idf`, `indice`) para vetorizar a pergunta com os mesmos pesos do corpus.
+- **Endpoint `POST /api/v1/ask_docs/`:** recebe `{question, top_k, min_score}`, valida a entrada e devolve `{answer, sources:[{path,title,range,score}]}`. Restrito ao papel `admin` (`IsAuthenticated` + `IsAdminRole`).
+- **Comando `manage.py indexar_docs`:** ingestão das fontes (`README.md` e `docs/openapi.yaml` por padrão), idempotente por hash, com `--force`, `--root`, `--index-path` e `--source`.
+- **Provedor `ProvedorMockDocs`:** resposta extrativa determinística na mesma porta `ProvedorLlm`, selecionada por `criar_llm_service(tarefa="docs")`; sempre cita o bloco recuperado.
+- **Volume `rag_data` no Compose:** preserva `/app/data/rag_index.sqlite3` entre recriações; a ingestão roda no startup após `migrate`.
+- **Testes:** 63 testes unitários (chunking, embeddings, índice, ingestão, serviço e prompt/mock) e testes de integração HTTP cobrindo 401/403/400, caminho feliz, guardrail e mapeamento 500/502/503.
+- **`docs/aulas/24-rag-documentacao.md`:** arquitetura, modelagem, ingestão, recuperação, contrato, testes e limitações.
+
+### Alterado
+- **`api/config/settings.py`:** `ASK_DOCS_*` (índice, fontes, `top_k`, `min_score`, chunking, tokens e log), `LLM_MODEL_DOCS` e o logger `core.ask_docs`.
+- **`api/core/llm/servico.py`:** fábrica por tarefa agora também aceita `docs`, com singleton e circuit breaker próprios.
+- **`api/core/urls.py`:** rota `ask_docs/` sob `/api/v1/`.
+- **`docs/openapi.yaml`:** versão `1.24.0`, tag `ask_docs`, path `/api/v1/ask_docs/` e schemas `AskDocsRequest`, `AskDocsSource` e `AskDocsResponse`.
+- **`README.md`:** rota, índice de aulas e seção do assistente RAG com arquitetura, parâmetros de indexação, reindexação, exemplos e limitações.
+- **`.env.example`, `.gitignore`, `.dockerignore`, `Dockerfile` e `docker-compose.yml`:** variáveis da Aula 24, exclusão do SQLite local, `indexar_docs` no startup e volume dedicado.
+- **`specs/README.md` e `AGENTS.md`:** índice da Aula 24 e comandos de indexação/simulação.
+
+### Notas
+- Os embeddings são **lexicais** (TF-IDF com vocabulário exato), sem rede ou credenciais; sinônimos sem tokens em comum podem não se aproximar. O índice e a recuperação são reais; a síntese é o mock extrativo documentado.
+- Perguntas fora do limiar não chamam a LLM: recebem a frase de guardrail e `sources: []`.
+
 ## [1.23.0] - 2026-11-04 — Pipeline de CI/CD Avançado: Cache, Compose e Deploy Simulado
 
 ### Adicionado
