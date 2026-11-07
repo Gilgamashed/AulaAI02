@@ -72,6 +72,8 @@ USER appuser
 EXPOSE 8000
 
 # --- ENTRYPOINT DA API ------------------------------------------------
-# Aplica as migrações do Django e sobe o WSGI (gunicorn) na porta 8000.
-# O banco já está saudável: o compose usa depends_on: db: service_healthy.
-CMD ["sh", "-c", "python api/manage.py migrate --noinput && gunicorn --bind 0.0.0.0:8000 api.config.wsgi:application"]
+# Aplica as migrações do Django, constrói o índice RAG (Aula 24) e sobe o
+# WSGI (gunicorn) na porta 8000. O banco já está saudável: o compose usa
+# depends_on: db: service_healthy. A ingestão é idempotente por hash: em um
+# restart sem mudança de documentação ela não reindexa nada.
+CMD ["sh", "-c", "python api/manage.py migrate --noinput && python api/manage.py indexar_docs && gunicorn --bind 0.0.0.0:8000 api.config.wsgi:application"]

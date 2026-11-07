@@ -40,6 +40,11 @@ docs/assets/SpecDD.jpg
 Thumbs.db
 .DS_Store
 
+# Índice RAG local (Aula 24): o container constrói o seu em /app/data
+data/*.sqlite3
+data/*.sqlite3-*
+data/*.db
+
 # Docker
 Dockerfile
 .dockerignore

@@ -138,7 +138,23 @@ services:
       ASK_SQL_TIMEOUT_MS: ${ASK_SQL_TIMEOUT_MS:-3000}
       ASK_SQL_MAX_TOKENS: ${ASK_SQL_MAX_TOKENS:-500}
       ASK_SQL_LOG_LEVEL: ${ASK_SQL_LOG_LEVEL:-INFO}
+      # Aula 24 (RAG): o índice é um SQLite em /app/data (volume nomeado) e a
+      # ingestão roda no startup, de forma idempotente por hash.
+      LLM_MODEL_DOCS: ${LLM_MODEL_DOCS:-mock-docs}
+      ASK_DOCS_INDEX_PATH: ${ASK_DOCS_INDEX_PATH:-/app/data/rag_index.sqlite3}
+      ASK_DOCS_SOURCES: ${ASK_DOCS_SOURCES:-README.md,docs/openapi.yaml}
+      ASK_DOCS_TOP_K: ${ASK_DOCS_TOP_K:-3}
+      ASK_DOCS_MAX_TOP_K: ${ASK_DOCS_MAX_TOP_K:-10}
+      ASK_DOCS_MIN_SCORE: ${ASK_DOCS_MIN_SCORE:-0.25}
+      ASK_DOCS_CHUNK_TOKENS: ${ASK_DOCS_CHUNK_TOKENS:-400}
+      ASK_DOCS_CHUNK_OVERLAP: ${ASK_DOCS_CHUNK_OVERLAP:-80}
+      ASK_DOCS_MAX_TOKENS: ${ASK_DOCS_MAX_TOKENS:-600}
+      ASK_DOCS_LOG_LEVEL: ${ASK_DOCS_LOG_LEVEL:-INFO}
       API_METRICS_ENABLED: ${API_METRICS_ENABLED:-true}
+    volumes:
+      # Aula 24: o índice SQLite do RAG é reconstruído no startup, mas o
+      # volume preserva os chunks entre recriações do container.
+      - rag_data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -559,3 +575,4 @@ volumes:
   pgdata:
   rabbitmqdata:
   kafkadata:
+  rag_data:

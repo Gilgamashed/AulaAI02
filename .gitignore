@@ -43,6 +43,11 @@ node_modules/
 # Docker / Compose local
 *.log
 
+# Índice RAG local (Aula 24) — reconstruído por `manage.py indexar_docs`
+data/*.sqlite3
+data/*.sqlite3-*
+data/*.db
+
 # Sistema operacional
 .DS_Store
 Thumbs.db
