@@ -6,6 +6,7 @@ from rest_framework_simplejwt.views import (
     TokenVerifyView,
 )
 
+from .ask_docs.views import AskDocsView
 from .ask_sql.views import AskSqlView
 from .throttling import ThrottleMemoriaScope
 from .views import (
@@ -84,4 +85,8 @@ urlpatterns = [
     # natural vira SELECT validado e executado em transação read-only.
     # Restrito ao papel admin — ver AskSqlView.
     path("ask_sql/", AskSqlView.as_view(), name="ask-sql"),
+    # Aula 24: `POST /api/v1/ask_docs/` — pergunta técnica respondida com
+    # base no índice RAG (README + OpenAPI) e fontes citadas.
+    # Restrito ao papel admin — ver AskDocsView.
+    path("ask_docs/", AskDocsView.as_view(), name="ask-docs"),
 ] + router.urls

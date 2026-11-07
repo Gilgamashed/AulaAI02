@@ -585,6 +585,38 @@ ASK_SQL_TIMEOUT_MS = int(os.environ.get("ASK_SQL_TIMEOUT_MS", "3000"))
 ASK_SQL_MAX_TOKENS = int(os.environ.get("ASK_SQL_MAX_TOKENS", "500"))
 
 # =====================================================================
+# Aula 24 — Assistente de documentação via RAG (`POST /api/v1/ask_docs/`)
+# =====================================================================
+# O índice é um SQLite separado do banco de negócio (spec: armazenamento
+# leve). Os embeddings são locais/determinísticos; nenhuma rede ou chave.
+#   ASK_DOCS_INDEX_PATH   -> arquivo SQLite do índice.
+#   ASK_DOCS_SOURCES      -> fontes relativas à raiz, separadas por vírgula.
+#   ASK_DOCS_TOP_K        -> quantidade padrão de chunks recuperados.
+#   ASK_DOCS_MAX_TOP_K    -> teto aceito no payload.
+#   ASK_DOCS_MIN_SCORE    -> similaridade mínima padrão (cosseno, 0..1).
+#   ASK_DOCS_CHUNK_TOKENS / ASK_DOCS_CHUNK_OVERLAP -> divisão do texto.
+#   ASK_DOCS_MAX_TOKENS   -> teto de tokens da resposta.
+#   LLM_MODEL_DOCS        -> nome informacional do provedor de resposta.
+ASK_DOCS_INDEX_PATH = os.environ.get(
+    "ASK_DOCS_INDEX_PATH",
+    str(BASE_DIR.parent / "data" / "rag_index.sqlite3"),
+)
+ASK_DOCS_SOURCES = [
+    fonte.strip()
+    for fonte in os.environ.get(
+        "ASK_DOCS_SOURCES", "README.md,docs/openapi.yaml"
+    ).split(",")
+    if fonte.strip()
+]
+ASK_DOCS_TOP_K = int(os.environ.get("ASK_DOCS_TOP_K", "3"))
+ASK_DOCS_MAX_TOP_K = int(os.environ.get("ASK_DOCS_MAX_TOP_K", "10"))
+ASK_DOCS_MIN_SCORE = float(os.environ.get("ASK_DOCS_MIN_SCORE", "0.25"))
+ASK_DOCS_CHUNK_TOKENS = int(os.environ.get("ASK_DOCS_CHUNK_TOKENS", "400"))
+ASK_DOCS_CHUNK_OVERLAP = int(os.environ.get("ASK_DOCS_CHUNK_OVERLAP", "80"))
+ASK_DOCS_MAX_TOKENS = int(os.environ.get("ASK_DOCS_MAX_TOKENS", "600"))
+LLM_MODEL_DOCS = os.environ.get("LLM_MODEL_DOCS", "mock-docs")
+
+# =====================================================================
 # Aula 8 — Logging estruturado (JSON) do cache
 # =====================================================================
 # Um logger dedicado ("core.cache") emite UMA LINHA JSON por evento de
@@ -634,6 +666,13 @@ LOGGING = {
         "core.ask_sql": {
             "handlers": ["console"],
             "level": os.environ.get("ASK_SQL_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+        # Aula 24: eventos do assistente de documentação (guardrail, índice
+        # ausente, falha do provedor). Filtre por "core.ask_docs" nos logs.
+        "core.ask_docs": {
+            "handlers": ["console"],
+            "level": os.environ.get("ASK_DOCS_LOG_LEVEL", "INFO"),
             "propagate": False,
         },
     },

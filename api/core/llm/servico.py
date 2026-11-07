@@ -37,6 +37,7 @@ from .erros import (
 )
 from .metricas import FALHA, SUCESSO, TERMINAL, llm_metrics
 from .mock import ProvedorMock
+from .mock_docs import ProvedorMockDocs
 from .mock_sql import ProvedorMockSql
 from .portas import LlmResposta, ProvedorLlm
 from .redacao import redigir
@@ -204,7 +205,8 @@ class LlmService:
 PROVIDER_MOCK = "mock"
 TAREFA_ASSIST = "assist"
 TAREFA_SQL = "sql"
-TAREFAS = frozenset({TAREFA_ASSIST, TAREFA_SQL})
+TAREFA_DOCS = "docs"
+TAREFAS = frozenset({TAREFA_ASSIST, TAREFA_SQL, TAREFA_DOCS})
 
 _instancias: dict[str, LlmService] = {}
 _trava_singleton = threading.Lock()
@@ -248,16 +250,27 @@ def _montar(cfg: Any, tarefa: str = TAREFA_ASSIST) -> LlmService:
         max_tentativas_half_open=int(getattr(cfg, "LLM_CB_MAX_TENTATIVAS_HALF_OPEN", 2)),
     )
     provedor: ProvedorLlm = (
-        ProvedorMockSql() if tarefa == TAREFA_SQL else ProvedorMock()
+        ProvedorMockSql()
+        if tarefa == TAREFA_SQL
+        else ProvedorMockDocs()
+        if tarefa == TAREFA_DOCS
+        else ProvedorMock()
     )
-    modelo_padrao = "mock-sql" if tarefa == TAREFA_SQL else "mock"
-    modelo = str(
-        getattr(
-            cfg,
-            "LLM_MODEL_SQL" if tarefa == TAREFA_SQL else "LLM_MODEL",
-            modelo_padrao,
-        )
+    modelo_padrao = (
+        "mock-sql"
+        if tarefa == TAREFA_SQL
+        else "mock-docs"
+        if tarefa == TAREFA_DOCS
+        else "mock"
     )
+    nome_setting_modelo = (
+        "LLM_MODEL_SQL"
+        if tarefa == TAREFA_SQL
+        else "LLM_MODEL_DOCS"
+        if tarefa == TAREFA_DOCS
+        else "LLM_MODEL"
+    )
+    modelo = str(getattr(cfg, nome_setting_modelo, modelo_padrao))
     return LlmService(
         provedor,
         retry=retry,

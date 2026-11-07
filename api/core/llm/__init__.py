@@ -37,12 +37,14 @@ from .erros import (
     descrever,
 )
 from .mock import ProvedorMock
+from .mock_docs import ProvedorMockDocs
 from .mock_sql import ProvedorMockSql
 from .portas import LlmResposta, ProvedorLlm
 from .retry import RetryPolicy
 from .servico import (
     PROVIDER_MOCK,
     TAREFA_ASSIST,
+    TAREFA_DOCS,
     TAREFA_SQL,
     LlmService,
     criar_llm_service,
@@ -67,10 +69,12 @@ __all__ = [
     "PROVIDER_MOCK",
     "ProvedorLlm",
     "ProvedorMock",
+    "ProvedorMockDocs",
     "ProvedorMockSql",
     "RespostaInvalida",
     "RetryPolicy",
     "TAREFA_ASSIST",
+    "TAREFA_DOCS",
     "TAREFA_SQL",
     "criar_llm_service",
     "descrever",
