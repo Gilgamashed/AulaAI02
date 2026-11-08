@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SynapseShop — Demonstração</title>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --painel: #ffffff;
+      --texto: #14213d;
+      --mudo: #5b6472;
+      --borda: #d6dce5;
+      --acento: #0b5ed7;
+      --acento-escuro: #0847a6;
+      --ok: #067647;
+      --erro: #b42318;
+      --aviso: #8a5a00;
+      --raio: 10px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--texto);
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 24px;
+      background: #0f1f3d;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(15, 31, 61, .25);
+    }
+    header h1 { margin: 0; font-size: 1.35rem; letter-spacing: .02em; }
+    #sessao { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    #usuario-atual { font-weight: 600; }
+    #papel-atual { color: #c9d6ea; }
+    main {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      gap: 20px;
+    }
+    .card {
+      background: var(--painel);
+      border: 1px solid var(--borda);
+      border-radius: var(--raio);
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(15, 31, 61, .06);
+    }
+    .card h2 { margin-top: 0; font-size: 1.2rem; }
+    .card h3 { font-size: 1.05rem; }
+    .mudo { color: var(--mudo); }
+    .linha {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .grade-produtos {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 14px;
+    }
+    .produto {
+      border: 1px solid var(--borda);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfe;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .produto h3 { margin: 0; font-size: 1rem; }
+    .produto .preco { font-size: 1.1rem; font-weight: 700; color: var(--acento-escuro); }
+    input, select, textarea {
+      font: inherit;
+      color: var(--texto);
+      background: #fff;
+      border: 1px solid var(--borda);
+      border-radius: 7px;
+      padding: 8px 10px;
+    }
+    input[type="number"] { width: 90px; }
+    textarea { width: 100%; min-height: 90px; resize: vertical; }
+    button {
+      font: inherit;
+      font-weight: 600;
+      color: #fff;
+      background: var(--acento);
+      border: 1px solid var(--acento);
+      border-radius: 7px;
+      padding: 8px 14px;
+      cursor: pointer;
+    }
+    button:hover { background: var(--acento-escuro); }
+    button.secundario { color: var(--acento-escuro); background: #eef3fb; border-color: #b9caea; }
+    button.secundario:hover { background: #dde8f8; }
+    button.perigo { background: var(--erro); border-color: var(--erro); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--borda); vertical-align: top; }
+    th { background: #eef2f8; font-size: .92rem; }
+    .status { margin: 8px 0 0; font-weight: 600; }
+    .status.ok { color: var(--ok); }
+    .status.erro { color: var(--erro); }
+    .status.aviso { color: var(--aviso); }
+    .status.neutro { color: var(--mudo); }
+    pre {
+      margin: 8px 0;
+      padding: 12px;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e2e8f0;
+      overflow: auto;
+      max-height: 320px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .abas { display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--borda); margin-bottom: 14px; }
+    .aba { background: transparent; color: var(--texto); border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; }
+    .aba:hover { background: #eef3fb; }
+    .aba.ativa { background: #eef3fb; border-color: var(--borda); color: var(--acento-escuro); }
+    .painel-aba { display: none; }
+    .painel-aba.ativa { display: block; }
+    .cartao-metrica { border: 1px solid var(--borda); border-radius: 8px; padding: 10px 12px; background: #fbfcfe; margin-bottom: 10px; }
+    .cartao-metrica h4 { margin: 0 0 6px; font-size: .95rem; }
+    .links a { color: var(--acento-escuro); font-weight: 600; margin-right: 16px; }
+    .exemplos { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+    .exemplos button { font-size: .9rem; padding: 5px 10px; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0; }
+    dt { font-weight: 700; }
+    dd { margin: 0; }
+    @media (max-width: 700px) {
+      header { padding: 10px 14px; }
+      main { padding: 12px; }
+      .card { padding: 14px; }
+      dl { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>SynapseShop</h1>
+  <div id="sessao">
+    <span id="usuario-atual">Visitante</span>
+    <span id="papel-atual"></span>
+    <button id="btn-logout" type="button" class="secundario" hidden>Sair</button>
+  </div>
+</header>
+
+<main>
+  <section id="login" class="card">
+    <h2>Login</h2>
+    <p class="mudo">Use as credenciais demo: <strong>demo_admin</strong> ou <strong>demo_user</strong>.</p>
+    <div id="login-formulario">
+      <form id="form-login" class="linha">
+        <input id="login-usuario" autocomplete="username" placeholder="Usuário" required>
+        <input id="login-senha" type="password" autocomplete="current-password" placeholder="Senha" required>
+        <button type="submit">Entrar</button>
+      </form>
+    </div>
+    <p id="login-status" class="status neutro" role="status"></p>
+  </section>
+
+  <section id="catalogo" class="card">
+    <h2>Catálogo</h2>
+    <div class="linha">
+      <input id="catalogo-busca" placeholder="Buscar por nome, marca ou SKU" aria-label="Buscar no catálogo">
+      <select id="catalogo-categoria" aria-label="Filtrar por categoria">
+        <option value="">Todas as categorias</option>
+      </select>
+      <select id="catalogo-ordem" aria-label="Ordenar catálogo">
+        <option value="-created_at">Mais recentes</option>
+        <option value="name">Nome A-Z</option>
+        <option value="price">Menor preço</option>
+        <option value="-price">Maior preço</option>
+      </select>
+      <button id="btn-buscar-catalogo" type="button" class="secundario">Buscar</button>
+    </div>
+    <div id="catalogo-lista" class="grade-produtos"></div>
+    <p id="catalogo-status" class="status neutro" role="status"></p>
+    <div class="linha">
+      <button id="btn-catalogo-anterior" type="button" class="secundario">Anterior</button>
+      <span id="catalogo-pagina" class="mudo"></span>
+      <button id="btn-catalogo-proxima" type="button" class="secundario">Próxima</button>
+    </div>
+
+    <details id="bloco-produto" hidden>
+      <summary><strong>Cadastrar produto</strong></summary>
+      <form id="form-produto" class="linha" style="margin-top: 12px;">
+        <input id="produto-nome" placeholder="Nome" required>
+        <input id="produto-marca" placeholder="Marca" required>
+        <input id="produto-modelo" placeholder="Modelo" required>
+        <input id="produto-sku" placeholder="SKU (ex.: XYZ-1234-AB)" required>
+        <input id="produto-preco" type="number" min="0" step="0.01" placeholder="Preço" required>
+        <select id="produto-categoria" required aria-label="Categoria do produto"></select>
+        <input id="produto-garantia" type="number" min="0" value="12" placeholder="Garantia (meses)">
+        <input id="produto-descricao" placeholder="Descrição (opcional)" style="flex: 1 1 260px;">
+        <button type="submit">Cadastrar</button>
+      </form>
+      <p id="produto-status" class="status neutro" role="status"></p>
+    </details>
+  </section>
+
+  <section id="pedido" class="card">
+    <h2>Pedido</h2>
+    <table>
+      <thead>
+        <tr><th>SKU</th><th>Quantidade</th><th>Preço unitário</th><th>Subtotal</th><th></th></tr>
+      </thead>
+      <tbody id="carrinho-itens"></tbody>
+    </table>
+    <p>Total estimado: <strong id="carrinho-total">R$ 0,00</strong></p>
+    <div class="linha">
+      <button id="btn-checkout" type="button" disabled>Criar pedido</button>
+      <button id="btn-reenviar" type="button" class="secundario" disabled>Reenviar mesmo pedido</button>
+      <button id="btn-limpar-carrinho" type="button" class="secundario">Limpar carrinho</button>
+    </div>
+    {% if debug %}
+    <label class="linha"><input type="checkbox" id="pedido-simular-falha"> Simular falha (DLQ)</label>
+    {% endif %}
+    <p id="pedido-status" class="status neutro" role="status"></p>
+    <div id="pedido-resultado"></div>
+
+    <h3>Meus pedidos</h3>
+    <button id="btn-atualizar-pedidos" type="button" class="secundario">Atualizar lista</button>
+    <div id="pedidos-lista"></div>
+  </section>
+
+  <section id="pagamento" class="card">
+    <h2>Pagamento e notificação</h2>
+    <form id="form-pagamento" class="linha">
+      <input id="pagamento-pedido" type="number" min="1" placeholder="ID do pedido" required>
+      <select id="pagamento-metodo" aria-label="Método de pagamento">
+        <option value="pix">PIX</option>
+        <option value="cartao_credito">Cartão de crédito</option>
+        <option value="boleto">Boleto</option>
+      </select>
+      <label class="linha"><input type="checkbox" id="pagamento-aprovado" checked> Aprovado</label>
+      <input id="pagamento-motivo" placeholder="Motivo da recusa (se recusado)">
+      <select id="pagamento-canal" aria-label="Canal da notificação">
+        <option value="email">E-mail</option>
+        <option value="sms">SMS</option>
+        <option value="push">Push</option>
+      </select>
+      {% if debug %}
+      <label class="linha"><input type="checkbox" id="pagamento-simular-falha"> Simular falha (DLQ)</label>
+      {% endif %}
+      <button type="submit">Registrar pagamento</button>
+    </form>
+    <p id="pagamento-status" class="status neutro" role="status"></p>
+    <div id="pagamento-resultado"></div>
+    <h3>Notificações do pedido</h3>
+    <div id="notificacoes-lista" class="mudo">Nenhuma consulta realizada ainda.</div>
+  </section>
+
+  <section id="ia" class="card">
+    <h2>Assistentes de IA</h2>
+    <div class="abas" role="tablist">
+      <button class="aba ativa" type="button" data-aba="assist" role="tab">Suporte</button>
+      <button class="aba" type="button" data-aba="sql" role="tab">Texto-para-SQL</button>
+      <button class="aba" type="button" data-aba="docs" role="tab">Documentação</button>
+    </div>
+
+    <div id="aba-assist" class="painel-aba ativa" role="tabpanel">
+      <form id="form-assist">
+        <div class="linha">
+          <select id="assist-mode" aria-label="Modo do assistente">
+            <option value="summarize">Resumir</option>
+            <option value="explain">Explicar</option>
+          </select>
+          <input id="assist-temperature" type="number" min="0" max="1" step="0.1" value="0.2" aria-label="Temperature">
+          <input id="assist-max-tokens" type="number" min="1" max="4096" value="256" aria-label="Máximo de tokens">
+          <button type="submit">Executar</button>
+        </div>
+        <textarea id="assist-logs" placeholder="Cole um trecho de log aqui" required></textarea>
+      </form>
+      <p id="assist-status" class="status neutro" role="status"></p>
+      <div id="assist-resultado"></div>
+    </div>
+
+    <div id="aba-sql" class="painel-aba" role="tabpanel">
+      <p class="mudo">Restrito ao papel <strong>admin</strong>. A consulta é validada e executada em transação somente leitura.</p>
+      <div class="linha">
+        <input id="sql-pergunta" placeholder="Pergunta de negócio em português" style="flex: 1 1 420px;">
+        <button id="btn-sql" type="button">Consultar</button>
+      </div>
+      <div id="sql-exemplos" class="exemplos"></div>
+      <p id="sql-status" class="status neutro" role="status"></p>
+      <div id="sql-resultado"></div>
+    </div>
+
+    <div id="aba-docs" class="painel-aba" role="tabpanel">
+      <p class="mudo">Restrito ao papel <strong>admin</strong>. Responde apenas com base na documentação indexada e cita as fontes.</p>
+      <div class="linha">
+        <input id="docs-pergunta" placeholder="Pergunta técnica sobre o projeto" style="flex: 1 1 420px;">
+        <input id="docs-top-k" type="number" min="1" max="10" value="3" aria-label="Top K">
+        <input id="docs-min-score" type="number" min="0" max="1" step="0.01" value="0.25" aria-label="Score mínimo">
+        <button id="btn-docs" type="button">Perguntar</button>
+      </div>
+      <p id="docs-status" class="status neutro" role="status"></p>
+      <div id="docs-resultado"></div>
+    </div>
+  </section>
+
+  <section id="operacao" class="card">
+    <h2>Operação</h2>
+    <div class="linha">
+      <button id="btn-health" type="button" class="secundario">Atualizar saúde</button>
+      <button id="btn-cache-metrics" type="button" class="secundario">Métricas de cache</button>
+      <button id="btn-llm-metrics" type="button" class="secundario">Métricas de IA</button>
+    </div>
+    <p id="operacao-status" class="status neutro" role="status"></p>
+    <div class="cartao-metrica">
+      <h4>Saúde da API</h4>
+      <pre id="health-saida">Não consultado.</pre>
+    </div>
+    <div class="cartao-metrica">
+      <h4>Cache</h4>
+      <pre id="cache-saida">Não consultado.</pre>
+    </div>
+    <div class="cartao-metrica">
+      <h4>IA</h4>
+      <pre id="llm-saida">Não consultado.</pre>
+    </div>
+    <p class="links">
+      <a id="link-streamlit" href="http://localhost:8501" target="_blank" rel="noopener noreferrer">Painel Streamlit</a>
+      <a href="/docs/" target="_blank" rel="noopener noreferrer">Swagger</a>
+      <a href="/redoc/" target="_blank" rel="noopener noreferrer">ReDoc</a>
+      <a href="/docs/openapi.yaml" target="_blank" rel="noopener noreferrer">OpenAPI</a>
+    </p>
+  </section>
+</main>
+
+{% verbatim %}
+<script>
+(() => {
+  'use strict';
+
+  const API = '/api/v1';
+  const CHAVE_ACCESS = 'synapse.access';
+  const CHAVE_REFRESH = 'synapse.refresh';
+  const CHAVE_USUARIO = 'synapse.usuario';
+  const CHAVE_PAPEL = 'synapse.papel';
+  const TIMEOUT_MS = 15000;
+  const EXEMPLOS_SQL = [
+    'Quais os 5 últimos usuários cadastrados?',
+    'Qual a soma do valor dos últimos 3 pedidos?',
+    'Quais usuários fizeram mais pedidos?',
+    'Quantos pedidos existem por status?',
+    'Quais os produtos mais caros?'
+  ];
+
+  const estado = {
+    access: sessionStorage.getItem(CHAVE_ACCESS),
+    refresh: sessionStorage.getItem(CHAVE_REFRESH),
+    usuario: sessionStorage.getItem(CHAVE_USUARIO) || '',
+    papel: sessionStorage.getItem(CHAVE_PAPEL) || '',
+    chavePedido: '',
+    assinaturaPedido: '',
+    paginaCatalogo: null
+  };
+
+  const carrinho = new Map();
+
+  function el(id) {
+    return document.getElementById(id);
+  }
+
+  function criar(tag, texto, classe) {
+    const node = document.createElement(tag);
+    if (texto !== undefined && texto !== null) node.textContent = String(texto);
+    if (classe) node.className = classe;
+    return node;
+  }
+
+  function limpar(node) {
+    if (node) node.replaceChildren();
+  }
+
+  function formatarMoeda(valor) {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(valor) || 0);
+  }
+
+  function formatarData(valor) {
+    if (!valor) return '—';
+    const data = new Date(valor);
+    return Number.isNaN(data.getTime()) ? String(valor) : data.toLocaleString('pt-BR');
+  }
+
+  function mostrarStatus(id, mensagem, tipo) {
+    const alvo = el(id);
+    if (!alvo) return;
+    alvo.textContent = mensagem;
+    alvo.className = 'status ' + (tipo || 'neutro');
+  }
+
+  function esperar(ms) {
+    return new Promise((resolver) => setTimeout(resolver, ms));
+  }
+
+  function achatarErro(dados) {
+    if (!dados) return '';
+    if (typeof dados === 'string') return dados;
+    if (Array.isArray(dados)) return dados.map(achatarErro).filter(Boolean).join('; ');
+    if (typeof dados === 'object') {
+      return Object.entries(dados).map(([campo, valor]) => {
+        const texto = achatarErro(valor);
+        return texto ? campo + ': ' + texto : campo;
+      }).filter(Boolean).join(' | ');
+    }
+    return String(dados);
+  }
+
+  function montarUrl(caminho) {
+    if (/^https?:\/\//i.test(caminho)) return caminho;
+    return caminho.startsWith('/api/v1') ? caminho : API + caminho;
+  }
+
+  async function renovarToken() {
+    if (!estado.refresh) return false;
+    try {
+      const resposta = await fetch(API + '/auth/token/refresh/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh: estado.refresh })
+      });
+      if (!resposta.ok) throw new Error('refresh recusado');
+      const dados = await resposta.json();
+      if (!dados.access) throw new Error('refresh sem access');
+      estado.access = dados.access;
+      sessionStorage.setItem(CHAVE_ACCESS, estado.access);
+      return true;
+    } catch (_erro) {
+      limparSessao();
+      return false;
+    }
+  }
+
+  async function requisitar(caminho, opcoes = {}, tentarRenovar = true) {
+    const controller = new AbortController();
+    const temporizador = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const headers = new Headers(opcoes.headers || {});
+    if (opcoes.body !== undefined && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+    if (estado.access && !opcoes.semAuth) {
+      headers.set('Authorization', 'Bearer ' + estado.access);
+    }
+
+    let resposta;
+    try {
+      resposta = await fetch(montarUrl(caminho), {
+        method: opcoes.method || 'GET',
+        headers,
+        body: opcoes.body === undefined ? undefined : JSON.stringify(opcoes.body),
+        signal: controller.signal
+      });
+    } catch (erro) {
+      clearTimeout(temporizador);
+      if (erro && erro.name === 'AbortError') {
+        throw new Error('Tempo esgotado ao falar com a API (15 s).');
+      }
+      throw new Error('Falha de rede ao falar com a API.');
+    }
+    clearTimeout(temporizador);
+
+    if (resposta.status === 401 && estado.refresh && tentarRenovar && !opcoes.semRenovar) {
+      const renovado = await renovarToken();
+      if (renovado) {
+        return requisitar(caminho, opcoes, false);
+      }
+    }
+
+    const texto = await resposta.text();
+    let dados = null;
+    try {
+      dados = texto ? JSON.parse(texto) : null;
+    } catch (_erro) {
+      dados = null;
+    }
+
+    if (!resposta.ok) {
+      const detalhe = achatarErro(dados) || (texto ? texto.slice(0, 300) : 'sem corpo');
+      const erro = new Error('HTTP ' + resposta.status + ': ' + detalhe);
+      erro.status = resposta.status;
+      erro.dados = dados;
+      throw erro;
+    }
+    return { status: resposta.status, dados: dados };
+  }
+
+  function salvarSessao(usuario) {
+    sessionStorage.setItem(CHAVE_ACCESS, estado.access);
+    sessionStorage.setItem(CHAVE_REFRESH, estado.refresh);
+    sessionStorage.setItem(CHAVE_USUARIO, usuario);
+    sessionStorage.setItem(CHAVE_PAPEL, estado.papel || 'user');
+    estado.usuario = usuario;
+  }
+
+  function limparSessao() {
+    estado.access = '';
+    estado.refresh = '';
+    estado.usuario = '';
+    estado.papel = '';
+    sessionStorage.removeItem(CHAVE_ACCESS);
+    sessionStorage.removeItem(CHAVE_REFRESH);
+    sessionStorage.removeItem(CHAVE_USUARIO);
+    sessionStorage.removeItem(CHAVE_PAPEL);
+    atualizarSessao();
+  }
+
+  function atualizarSessao() {
+    const autenticado = Boolean(estado.access && estado.usuario);
+    el('usuario-atual').textContent = autenticado ? estado.usuario : 'Visitante';
+    el('papel-atual').textContent = autenticado ? '(' + (estado.papel || 'user') + ')' : '';
+    el('btn-logout').hidden = !autenticado;
+    el('login-formulario').hidden = autenticado;
+    const blocoProduto = el('bloco-produto');
+    if (blocoProduto) blocoProduto.hidden = !autenticado;
+  }
+
+  async function detectarPapel() {
+    if (!estado.access) return;
+    try {
+      await requisitar('/cache/metrics/');
+      estado.papel = 'admin';
+    } catch (erro) {
+      if (erro.status === 403) {
+        estado.papel = 'user';
+      } else {
+        estado.papel = 'user';
+        mostrarStatus('login-status', 'Autenticado, mas não foi possível confirmar o papel: ' + erro.message, 'aviso');
+      }
+    }
+    sessionStorage.setItem(CHAVE_PAPEL, estado.papel);
+  }
+
+  async function carregarCategorias() {
+    const { dados } = await requisitar('/categories/');
+    const categorias = dados.results || dados || [];
+    const filtro = el('catalogo-categoria');
+    const formulario = el('produto-categoria');
+    limpar(filtro);
+    filtro.appendChild(new Option('Todas as categorias', ''));
+    limpar(formulario);
+    formulario.appendChild(new Option('Selecione uma categoria', ''));
+    categorias.forEach((categoria) => {
+      filtro.appendChild(new Option(categoria.name, String(categoria.id)));
+      formulario.appendChild(new Option(categoria.name, String(categoria.id)));
+    });
+  }
+
+  function parametrosCatalogo() {
+    const params = new URLSearchParams();
+    const busca = el('catalogo-busca').value.trim();
+    const categoria = el('catalogo-categoria').value;
+    const ordem = el('catalogo-ordem').value;
+    if (busca) params.set('search', busca);
+    if (categoria) params.set('category', categoria);
+    if (ordem) params.set('ordering', ordem);
+    return params;
+  }
+
+  async function carregarCatalogo(url) {
+    mostrarStatus('catalogo-status', 'Carregando catálogo...', 'neutro');
+    try {
+      const caminho = url || ('/items/?' + parametrosCatalogo().toString());
+      const { dados } = await requisitar(caminho);
+      const produtos = dados.results || [];
+      estado.paginaCatalogo = { next: dados.next, previous: dados.previous };
+      renderizarCatalogo(produtos);
+      el('btn-catalogo-proxima').disabled = !dados.next;
+      el('btn-catalogo-anterior').disabled = !dados.previous;
+      el('catalogo-pagina').textContent = dados.count !== undefined ? (dados.count + ' produto(s)') : '';
+      mostrarStatus('catalogo-status', produtos.length ? '' : 'Nenhum produto encontrado.', 'neutro');
+    } catch (erro) {
+      mostrarStatus('catalogo-status', erro.message, 'erro');
+    }
+  }
+
+  function renderizarCatalogo(produtos) {
+    const lista = el('catalogo-lista');
+    limpar(lista);
+    produtos.forEach((produto) => lista.appendChild(criarCartaoProduto(produto)));
+  }
+
+  function criarCartaoProduto(produto) {
+    const cartao = criar('article', null, 'produto');
+    cartao.appendChild(criar('h3', produto.name));
+    cartao.appendChild(criar('p', (produto.brand || '') + ' ' + (produto.model || ''), 'mudo'));
+    cartao.appendChild(criar('p', 'SKU ' + produto.sku));
+    cartao.appendChild(criar('p', formatarMoeda(produto.price), 'preco'));
+    cartao.appendChild(criar('p', 'Categoria: ' + (produto.category_name || produto.category || '—')));
+    cartao.appendChild(criar('p', 'Estoque lógico: ' + (produto.is_active ? 'ativo' : 'inativo'), 'mudo'));
+
+    const linha = criar('div', null, 'linha');
+    const quantidade = document.createElement('input');
+    quantidade.type = 'number';
+    quantidade.min = '1';
+    quantidade.value = '1';
+    quantidade.setAttribute('aria-label', 'Quantidade de ' + produto.name);
+    quantidade.className = 'qtd';
+    const adicionar = criar('button', 'Adicionar', 'secundario');
+    adicionar.type = 'button';
+    adicionar.addEventListener('click', () => {
+      adicionarAoCarrinho(produto, Number(quantidade.value) || 1);
+    });
+    linha.append(quantidade, adicionar);
+    cartao.appendChild(linha);
+
+    if (estado.access && estado.papel === 'admin') {
+      const admin = criar('div', null, 'linha');
+      const editar = criar('button', 'Editar', 'secundario');
+      editar.type = 'button';
+      editar.addEventListener('click', () => editarProduto(produto));
+      const excluir = criar('button', 'Excluir', 'perigo');
+      excluir.type = 'button';
+      excluir.addEventListener('click', () => excluirProduto(produto));
+      admin.append(editar, excluir);
+      cartao.appendChild(admin);
+    }
+    return cartao;
+  }
+
+  async function editarProduto(produto) {
+    const nome = window.prompt('Novo nome do produto:', produto.name);
+    if (nome === null) return;
+    const preco = window.prompt('Novo preço (ex.: 1999.90):', produto.price);
+    if (preco === null) return;
+    try {
+      await requisitar('/items/' + produto.id + '/', { method: 'PATCH', body: { name: nome, price: preco } });
+      mostrarStatus('catalogo-status', 'Produto atualizado.', 'ok');
+      await carregarCatalogo();
+    } catch (erro) {
+      mostrarStatus('catalogo-status', erro.message, 'erro');
+    }
+  }
+
+  async function excluirProduto(produto) {
+    if (!window.confirm('Excluir o produto ' + produto.sku + '?')) return;
+    try {
+      await requisitar('/items/' + produto.id + '/', { method: 'DELETE' });
+      mostrarStatus('catalogo-status', 'Produto excluído.', 'ok');
+      await carregarCatalogo();
+    } catch (erro) {
+      mostrarStatus('catalogo-status', erro.message, 'erro');
+    }
+  }
+
+  async function cadastrarProduto(evento) {
+    evento.preventDefault();
+    const body = {
+      name: el('produto-nome').value.trim(),
+      brand: el('produto-marca').value.trim(),
+      model: el('produto-modelo').value.trim(),
+      sku: el('produto-sku').value.trim().toUpperCase(),
+      price: el('produto-preco').value,
+      category: Number(el('produto-categoria').value),
+      warranty_months: Number(el('produto-garantia').value || 12),
+      description: el('produto-descricao').value.trim()
+    };
+    try {
+      const { status } = await requisitar('/items/', { method: 'POST', body });
+      mostrarStatus('produto-status', 'Produto cadastrado (HTTP ' + status + ').', 'ok');
+      el('form-produto').reset();
+      await carregarCatalogo();
+    } catch (erro) {
+      mostrarStatus('produto-status', erro.message, 'erro');
+    }
+  }
+
+  function adicionarAoCarrinho(produto, quantidade) {
+    const atual = carrinho.get(produto.sku) || { quantidade: 0, preco: Number(produto.price), nome: produto.name };
+    atual.quantidade += Math.max(1, quantidade);
+    atual.preco = Number(produto.price);
+    carrinho.set(produto.sku, atual);
+    renderizarCarrinho();
+    mostrarStatus('pedido-status', 'Item adicionado ao carrinho.', 'ok');
+  }
+
+  function renderizarCarrinho() {
+    const corpo = el('carrinho-itens');
+    limpar(corpo);
+    let total = 0;
+    carrinho.forEach((item, sku) => {
+      const subtotal = item.quantidade * item.preco;
+      total += subtotal;
+      const linha = document.createElement('tr');
+      linha.appendChild(criar('td', sku));
+      linha.appendChild(criar('td', item.quantidade));
+      linha.appendChild(criar('td', formatarMoeda(item.preco)));
+      linha.appendChild(criar('td', formatarMoeda(subtotal)));
+      const acoes = document.createElement('td');
+      const remover = criar('button', 'Remover', 'secundario');
+      remover.type = 'button';
+      remover.addEventListener('click', () => {
+        carrinho.delete(sku);
+        renderizarCarrinho();
+      });
+      acoes.appendChild(remover);
+      linha.appendChild(acoes);
+      corpo.appendChild(linha);
+    });
+    el('carrinho-total').textContent = formatarMoeda(total);
+    el('btn-checkout').disabled = carrinho.size === 0;
+    if (carrinho.size === 0) el('btn-reenviar').disabled = true;
+  }
+
+  function assinaturaCarrinho() {
+    return JSON.stringify(
+      Array.from(carrinho.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([sku, item]) => [sku, item.quantidade])
+    );
+  }
+
+  function novaChaveIdempotencia() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    const bytes = new Uint8Array(16);
+    if (window.crypto && window.crypto.getRandomValues) {
+      window.crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(bytes).map((valor) => valor.toString(16).padStart(2, '0')).join('');
+  }
+
+  function adicionarDefinicao(dl, termo, valor) {
+    dl.appendChild(criar('dt', termo));
+    dl.appendChild(criar('dd', valor));
+  }
+
+  async function enviarPedido() {
+    if (!estado.access) {
+      mostrarStatus('pedido-status', 'Faça login para criar um pedido.', 'aviso');
+      return;
+    }
+    if (carrinho.size === 0) {
+      mostrarStatus('pedido-status', 'O carrinho está vazio.', 'aviso');
+      return;
+    }
+    const assinatura = assinaturaCarrinho();
+    if (!estado.chavePedido || estado.assinaturaPedido !== assinatura) {
+      estado.chavePedido = novaChaveIdempotencia();
+      estado.assinaturaPedido = assinatura;
+    }
+    const headers = { 'Idempotency-Key': estado.chavePedido };
+    const simular = el('pedido-simular-falha');
+    if (simular && simular.checked) headers['X-Simular-Falha'] = 'true';
+
+    const body = {
+      itens: Array.from(carrinho.entries()).map(([sku, item]) => ({ sku: sku, quantidade: item.quantidade }))
+    };
+    mostrarStatus('pedido-status', 'Enviando pedido...', 'neutro');
+    try {
+      const { status, dados } = await requisitar('/pedidos/', { method: 'POST', body: body, headers: headers });
+      renderizarRespostaPedido(status, dados);
+      el('btn-reenviar').disabled = false;
+      if (simular && simular.checked) {
+        mostrarStatus('pedido-status', 'Pedido marcado para falha: a DLQ receberá a mensagem após a escada de reentrega.', 'aviso');
+      } else {
+        mostrarStatus('pedido-status', status === 200 ? 'Resposta idempotente: o pedido já existia.' : 'Pedido criado.', 'ok');
+      }
+      await carregarPedidos();
+    } catch (erro) {
+      mostrarStatus('pedido-status', erro.message, 'erro');
+    }
+  }
+
+  function renderizarRespostaPedido(status, dados) {
+    const alvo = el('pedido-resultado');
+    limpar(alvo);
+    const titulo = status === 201
+      ? 'Pedido criado (HTTP 201)'
+      : status === 200
+        ? 'Pedido já existente (HTTP 200 — idempotência)'
+        : 'Resposta HTTP ' + status;
+    alvo.appendChild(criar('h3', titulo));
+    const dl = document.createElement('dl');
+    adicionarDefinicao(dl, 'ID', dados.id !== undefined ? dados.id : '—');
+    adicionarDefinicao(dl, 'Status', dados.status !== undefined ? dados.status : '—');
+    adicionarDefinicao(dl, 'Total', dados.total !== undefined ? formatarMoeda(dados.total) : '—');
+    adicionarDefinicao(dl, 'Tentativas', dados.tentativas !== undefined ? dados.tentativas : '—');
+    adicionarDefinicao(dl, 'Motivo de falha', dados.motivo_falha || '—');
+    alvo.appendChild(dl);
+    renderizarJson(alvo, 'Evento publicado', dados.evento);
+    if (dados.pedido_id !== undefined) {
+      el('pagamento-pedido').value = dados.pedido_id;
+    } else if (dados.id !== undefined) {
+      el('pagamento-pedido').value = dados.id;
+    }
+  }
+
+  function renderizarJson(alvo, titulo, dados) {
+    if (dados === undefined || dados === null) return;
+    alvo.appendChild(criar('h4', titulo));
+    alvo.appendChild(criar('pre', JSON.stringify(dados, null, 2)));
+  }
+
+  async function carregarPedidos() {
+    if (!estado.access) {
+      limpar(el('pedidos-lista'));
+      el('pedidos-lista').appendChild(criar('p', 'Faça login para ver seus pedidos.', 'mudo'));
+      return;
+    }
+    try {
+      const { dados } = await requisitar('/pedidos/?ordering=-created_at');
+      const pedidos = dados.results || [];
+      const alvo = el('pedidos-lista');
+      limpar(alvo);
+      if (!pedidos.length) {
+        alvo.appendChild(criar('p', 'Nenhum pedido encontrado.', 'mudo'));
+        return;
+      }
+      const tabela = document.createElement('table');
+      const cabecalho = document.createElement('thead');
+      const linhaCabecalho = document.createElement('tr');
+      ['ID', 'Status', 'Total', 'Tentativas', 'Motivo de falha', 'Criado em', 'Ação'].forEach((texto) => {
+        linhaCabecalho.appendChild(criar('th', texto));
+      });
+      cabecalho.appendChild(linhaCabecalho);
+      const corpo = document.createElement('tbody');
+      pedidos.forEach((pedido) => {
+        const linha = document.createElement('tr');
+        linha.appendChild(criar('td', pedido.id));
+        linha.appendChild(criar('td', pedido.status));
+        linha.appendChild(criar('td', formatarMoeda(pedido.total)));
+        linha.appendChild(criar('td', pedido.tentativas));
+        linha.appendChild(criar('td', pedido.motivo_falha || '—'));
+        linha.appendChild(criar('td', formatarData(pedido.created_at)));
+        const acao = document.createElement('td');
+        const pagar = criar('button', 'Pagar', 'secundario');
+        pagar.type = 'button';
+        pagar.addEventListener('click', () => {
+          el('pagamento-pedido').value = pedido.id;
+          el('pagamento').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        acao.appendChild(pagar);
+        linha.appendChild(acao);
+        corpo.appendChild(linha);
+      });
+      tabela.append(cabecalho, corpo);
+      alvo.appendChild(tabela);
+    } catch (erro) {
+      mostrarStatus('pedido-status', 'Falha ao listar pedidos: ' + erro.message, 'erro');
+    }
+  }
+
+  async function registrarPagamento(evento) {
+    evento.preventDefault();
+    if (!estado.access) {
+      mostrarStatus('pagamento-status', 'Faça login para registrar um pagamento.', 'aviso');
+      return;
+    }
+    const pedidoId = Number(el('pagamento-pedido').value);
+    if (!pedidoId) {
+      mostrarStatus('pagamento-status', 'Informe o ID do pedido.', 'aviso');
+      return;
+    }
+    const aprovado = el('pagamento-aprovado').checked;
+    const body = {
+      metodo: el('pagamento-metodo').value,
+      aprovado: aprovado,
+      canal: el('pagamento-canal').value
+    };
+    if (!aprovado) {
+      body.motivo_recusa = el('pagamento-motivo').value.trim() || 'Recusado na simulação';
+    }
+    const headers = {};
+    const simular = el('pagamento-simular-falha');
+    if (simular && simular.checked) headers['X-Simular-Falha'] = 'true';
+
+    mostrarStatus('pagamento-status', 'Registrando pagamento...', 'neutro');
+    try {
+      const { status, dados } = await requisitar('/pedidos/' + pedidoId + '/pagamento/', {
+        method: 'POST',
+        body: body,
+        headers: headers
+      });
+      renderizarPagamento(dados, 'Pagamento registrado (HTTP ' + status + ')');
+      mostrarStatus('pagamento-status', 'Aguardando o worker concluir...', 'neutro');
+      acompanharPagamento(pedidoId);
+    } catch (erro) {
+      mostrarStatus('pagamento-status', erro.message, 'erro');
+      if (erro.status === 503) {
+        acompanharPagamento(pedidoId);
+      }
+    }
+  }
+
+  function renderizarPagamento(dados, titulo) {
+    const alvo = el('pagamento-resultado');
+    limpar(alvo);
+    alvo.appendChild(criar('h3', titulo || 'Pagamento'));
+    const dl = document.createElement('dl');
+    adicionarDefinicao(dl, 'ID', dados.id !== undefined ? dados.id : '—');
+    adicionarDefinicao(dl, 'Status', dados.status || '—');
+    adicionarDefinicao(dl, 'Valor', dados.valor !== undefined ? formatarMoeda(dados.valor) : '—');
+    adicionarDefinicao(dl, 'Transação', dados.transacao_id || '—');
+    adicionarDefinicao(dl, 'Aprovado', dados.aprovado ? 'sim' : 'não');
+    adicionarDefinicao(dl, 'Motivo da recusa', dados.motivo_recusa || '—');
+    adicionarDefinicao(dl, 'Tentativas', dados.tentativas !== undefined ? dados.tentativas : '—');
+    alvo.appendChild(dl);
+    renderizarJson(alvo, 'Evento publicado', dados.evento);
+  }
+
+  async function acompanharPagamento(pedidoId) {
+    let ultimo = null;
+    for (let tentativa = 1; tentativa <= 20; tentativa += 1) {
+      try {
+        const { dados } = await requisitar('/pedidos/' + pedidoId + '/pagamento/');
+        ultimo = dados;
+        renderizarPagamento(dados, 'Pagamento (consulta ' + tentativa + ')');
+        if (dados.status && dados.status !== 'registrado') {
+          mostrarStatus('pagamento-status', 'Pagamento concluído pelo worker: ' + dados.status + '.', 'ok');
+          break;
+        }
+      } catch (erro) {
+        if (erro.status === 404) {
+          mostrarStatus('pagamento-status', 'Este pedido ainda não tem pagamento registrado.', 'aviso');
+          return;
+        }
+        mostrarStatus('pagamento-status', erro.message, 'erro');
+        return;
+      }
+      await esperar(1000);
+    }
+    if (ultimo && ultimo.status === 'registrado') {
+      mostrarStatus('pagamento-status', 'O worker ainda não concluiu; use Atualizar lista e tente novamente.', 'aviso');
+    }
+    await carregarNotificacoes(pedidoId);
+  }
+
+  async function carregarNotificacoes(pedidoId) {
+    const alvo = el('notificacoes-lista');
+    limpar(alvo);
+    for (let tentativa = 1; tentativa <= 10; tentativa += 1) {
+      try {
+        const { dados } = await requisitar('/notificacoes/?pedido=' + pedidoId);
+        const notificacoes = dados.results || [];
+        if (notificacoes.length) {
+          notificacoes.forEach((notificacao) => {
+            const cartao = criar('div', null, 'cartao-metrica');
+            cartao.appendChild(criar('h4', notificacao.titulo));
+            cartao.appendChild(criar('p', notificacao.mensagem));
+            cartao.appendChild(criar('p', 'Canal: ' + notificacao.canal + ' • ' + formatarData(notificacao.enviada_em), 'mudo'));
+            alvo.appendChild(cartao);
+          });
+          return;
+        }
+      } catch (erro) {
+        alvo.appendChild(criar('p', erro.message, 'status erro'));
+        return;
+      }
+      await esperar(1000);
+    }
+    alvo.appendChild(criar('p', 'Nenhuma notificação encontrada ainda.', 'mudo'));
+  }
+
+  async function executarAssist(evento) {
+    evento.preventDefault();
+    if (!estado.access) {
+      mostrarStatus('assist-status', 'Faça login para usar o assistente.', 'aviso');
+      return;
+    }
+    const body = {
+      mode: el('assist-mode').value,
+      logs: el('assist-logs').value,
+      temperature: Number(el('assist-temperature').value),
+      max_tokens: Number(el('assist-max-tokens').value)
+    };
+    mostrarStatus('assist-status', 'Consultando o provedor de IA...', 'neutro');
+    try {
+      const { dados } = await requisitar('/assist/', { method: 'POST', body: body });
+      const alvo = el('assist-resultado');
+      limpar(alvo);
+      alvo.appendChild(criar('h3', 'Resposta'));
+      alvo.appendChild(criar('p', dados.answer || '—'));
+      const meta = dados.meta || {};
+      alvo.appendChild(criar('p', 'Tokens de prompt: ' + (meta.tokens_prompt ?? '—') + ' • Tokens de saída: ' + (meta.tokens_output ?? '—'), 'mudo'));
+      mostrarStatus('assist-status', 'Resposta recebida.', 'ok');
+    } catch (erro) {
+      mostrarStatus('assist-status', erro.message, 'erro');
+    }
+  }
+
+  async function executarSql() {
+    if (estado.papel !== 'admin') {
+      mostrarStatus('sql-status', 'A consulta em linguagem natural é restrita ao papel admin.', 'aviso');
+      return;
+    }
+    const pergunta = el('sql-pergunta').value.trim();
+    if (!pergunta) {
+      mostrarStatus('sql-status', 'Informe uma pergunta.', 'aviso');
+      return;
+    }
+    mostrarStatus('sql-status', 'Gerando e executando SQL...', 'neutro');
+    try {
+      const { dados } = await requisitar('/ask_sql/', { method: 'POST', body: { question: pergunta } });
+      renderizarSql(dados);
+      mostrarStatus('sql-status', 'Consulta executada.', 'ok');
+    } catch (erro) {
+      const alvo = el('sql-resultado');
+      limpar(alvo);
+      mostrarStatus('sql-status', erro.message, 'erro');
+      if (erro.dados && Array.isArray(erro.dados.examples)) {
+        alvo.appendChild(criar('h4', 'Exemplos suportados'));
+        const exemplos = criar('div', null, 'exemplos');
+        erro.dados.examples.forEach((exemplo) => {
+          const botao = criar('button', exemplo, 'secundario');
+          botao.type = 'button';
+          botao.addEventListener('click', () => {
+            el('sql-pergunta').value = exemplo;
+            executarSql();
+          });
+          exemplos.appendChild(botao);
+        });
+        alvo.appendChild(exemplos);
+      }
+    }
+  }
+
+  function renderizarSql(dados) {
+    const alvo = el('sql-resultado');
+    limpar(alvo);
+    alvo.appendChild(criar('h3', 'SQL gerado'));
+    alvo.appendChild(criar('pre', dados.sql || '—'));
+    alvo.appendChild(criar('p', 'Linhas: ' + (dados.row_count ?? 0) + (dados.truncated ? ' (truncado)' : ''), 'mudo'));
+    const colunas = Array.isArray(dados.columns) ? dados.columns : [];
+    const linhas = Array.isArray(dados.rows) ? dados.rows : [];
+    if (!colunas.length) {
+      alvo.appendChild(criar('p', 'A consulta não devolveu colunas.', 'mudo'));
+      return;
+    }
+    const tabela = document.createElement('table');
+    const cabecalho = document.createElement('thead');
+    const linhaCabecalho = document.createElement('tr');
+    colunas.forEach((coluna) => linhaCabecalho.appendChild(criar('th', coluna)));
+    cabecalho.appendChild(linhaCabecalho);
+    const corpo = document.createElement('tbody');
+    linhas.forEach((linha) => {
+      const tr = document.createElement('tr');
+      (Array.isArray(linha) ? linha : [linha]).forEach((valor) => {
+        tr.appendChild(criar('td', valor === null || valor === undefined ? '—' : String(valor)));
+      });
+      corpo.appendChild(tr);
+    });
+    tabela.append(cabecalho, corpo);
+    alvo.appendChild(tabela);
+    const meta = dados.meta || {};
+    alvo.appendChild(criar('p', 'Modelo: ' + (meta.modelo || '—'), 'mudo'));
+  }
+
+  async function executarDocs() {
+    if (estado.papel !== 'admin') {
+      mostrarStatus('docs-status', 'O assistente de documentação é restrito ao papel admin.', 'aviso');
+      return;
+    }
+    const pergunta = el('docs-pergunta').value.trim();
+    if (!pergunta) {
+      mostrarStatus('docs-status', 'Informe uma pergunta.', 'aviso');
+      return;
+    }
+    const body = {
+      question: pergunta,
+      top_k: Number(el('docs-top-k').value),
+      min_score: Number(el('docs-min-score').value)
+    };
+    mostrarStatus('docs-status', 'Consultando a documentação...', 'neutro');
+    try {
+      const { dados } = await requisitar('/ask_docs/', { method: 'POST', body: body });
+      const alvo = el('docs-resultado');
+      limpar(alvo);
+      alvo.appendChild(criar('h3', 'Resposta'));
+      alvo.appendChild(criar('p', dados.answer || '—'));
+      const fontes = Array.isArray(dados.sources) ? dados.sources : [];
+      if (!fontes.length) {
+        alvo.appendChild(criar('p', 'Guardrail acionado: nenhuma fonte acima do score mínimo; a LLM não foi chamada.', 'aviso'));
+      } else {
+        alvo.appendChild(criar('h4', 'Fontes citadas'));
+        const lista = document.createElement('ul');
+        fontes.forEach((fonte) => {
+          const item = document.createElement('li');
+          item.textContent = (fonte.title || fonte.path) + ' — ' + (fonte.path || '') + ' [' + (fonte.range || '') + '] • score ' + (fonte.score ?? '—');
+          lista.appendChild(item);
+        });
+        alvo.appendChild(lista);
+      }
+      mostrarStatus('docs-status', 'Resposta recebida.', 'ok');
+    } catch (erro) {
+      mostrarStatus('docs-status', erro.message, 'erro');
+    }
+  }
+
+  async function carregarSaude() {
+    try {
+      const { dados } = await requisitar('/health', { semAuth: true });
+      el('health-saida').textContent = JSON.stringify(dados, null, 2);
+      mostrarStatus('operacao-status', 'Saúde consultada.', 'ok');
+    } catch (erro) {
+      el('health-saida').textContent = erro.message;
+      mostrarStatus('operacao-status', erro.message, 'erro');
+    }
+  }
+
+  async function carregarMetricasCache() {
+    if (estado.papel !== 'admin') {
+      el('cache-saida').textContent = 'Restrito ao papel admin.';
+      return;
+    }
+    try {
+      const { dados } = await requisitar('/cache/metrics/');
+      el('cache-saida').textContent = JSON.stringify(dados, null, 2);
+    } catch (erro) {
+      el('cache-saida').textContent = erro.message;
+    }
+  }
+
+  async function carregarMetricasLlm() {
+    if (estado.papel !== 'admin') {
+      el('llm-saida').textContent = 'Restrito ao papel admin.';
+      return;
+    }
+    try {
+      const { dados } = await requisitar('/llm/metrics/');
+      el('llm-saida').textContent = JSON.stringify(dados, null, 2);
+    } catch (erro) {
+      el('llm-saida').textContent = erro.message;
+    }
+  }
+
+  function configurarAbas() {
+    const abas = document.querySelectorAll('.aba');
+    abas.forEach((aba) => {
+      aba.addEventListener('click', () => {
+        abas.forEach((outra) => outra.classList.remove('ativa'));
+        document.querySelectorAll('.painel-aba').forEach((painel) => painel.classList.remove('ativa'));
+        aba.classList.add('ativa');
+        const painel = el('aba-' + aba.dataset.aba);
+        if (painel) painel.classList.add('ativa');
+      });
+    });
+  }
+
+  function configurarExemplos() {
+    const alvo = el('sql-exemplos');
+    EXEMPLOS_SQL.forEach((exemplo) => {
+      const botao = criar('button', exemplo, 'secundario');
+      botao.type = 'button';
+      botao.addEventListener('click', () => {
+        el('sql-pergunta').value = exemplo;
+        executarSql();
+      });
+      alvo.appendChild(botao);
+    });
+  }
+
+  async function entrar(evento) {
+    evento.preventDefault();
+    const usuario = el('login-usuario').value.trim();
+    const senha = el('login-senha').value;
+    mostrarStatus('login-status', 'Autenticando...', 'neutro');
+    try {
+      const { dados } = await requisitar('/auth/token/', {
+        method: 'POST',
+        body: { username: usuario, password: senha },
+        semAuth: true,
+        semRenovar: true
+      });
+      estado.access = dados.access;
+      estado.refresh = dados.refresh;
+      await detectarPapel();
+      salvarSessao(usuario);
+      atualizarSessao();
+      el('login-senha').value = '';
+      mostrarStatus('login-status', 'Sessão iniciada como ' + estado.papel + '.', 'ok');
+      await Promise.all([carregarPedidos(), carregarMetricasCache(), carregarMetricasLlm()]);
+    } catch (erro) {
+      limparSessao();
+      mostrarStatus('login-status', erro.message, 'erro');
+    }
+  }
+
+  function sair() {
+    limparSessao();
+    mostrarStatus('login-status', 'Sessão encerrada.', 'ok');
+    el('login-usuario').focus();
+    carregarPedidos();
+    el('cache-saida').textContent = 'Não consultado.';
+    el('llm-saida').textContent = 'Não consultado.';
+  }
+
+  function configurarEventos() {
+    el('form-login').addEventListener('submit', entrar);
+    el('btn-logout').addEventListener('click', sair);
+    el('btn-buscar-catalogo').addEventListener('click', () => carregarCatalogo());
+    el('catalogo-busca').addEventListener('keydown', (evento) => {
+      if (evento.key === 'Enter') carregarCatalogo();
+    });
+    el('btn-catalogo-proxima').addEventListener('click', () => {
+      if (estado.paginaCatalogo && estado.paginaCatalogo.next) carregarCatalogo(estado.paginaCatalogo.next);
+    });
+    el('btn-catalogo-anterior').addEventListener('click', () => {
+      if (estado.paginaCatalogo && estado.paginaCatalogo.previous) carregarCatalogo(estado.paginaCatalogo.previous);
+    });
+    el('form-produto').addEventListener('submit', cadastrarProduto);
+    el('form-pagamento').addEventListener('submit', registrarPagamento);
+    el('form-assist').addEventListener('submit', executarAssist);
+    el('btn-checkout').addEventListener('click', enviarPedido);
+    el('btn-reenviar').addEventListener('click', enviarPedido);
+    el('btn-limpar-carrinho').addEventListener('click', () => {
+      carrinho.clear();
+      estado.chavePedido = '';
+      estado.assinaturaPedido = '';
+      renderizarCarrinho();
+      mostrarStatus('pedido-status', 'Carrinho limpo.', 'neutro');
+    });
+    el('btn-atualizar-pedidos').addEventListener('click', carregarPedidos);
+    el('btn-sql').addEventListener('click', executarSql);
+    el('btn-docs').addEventListener('click', executarDocs);
+    el('btn-health').addEventListener('click', carregarSaude);
+    el('btn-cache-metrics').addEventListener('click', carregarMetricasCache);
+    el('btn-llm-metrics').addEventListener('click', carregarMetricasLlm);
+  }
+
+  async function iniciar() {
+    configurarAbas();
+    configurarExemplos();
+    configurarEventos();
+    atualizarSessao();
+    el('link-streamlit').href = 'http://' + window.location.hostname + ':8501';
+    renderizarCarrinho();
+
+    try {
+      await carregarCategorias();
+    } catch (erro) {
+      mostrarStatus('catalogo-status', 'Falha ao carregar categorias: ' + erro.message, 'erro');
+    }
+    await carregarCatalogo();
+
+    if (estado.access) {
+      if (!estado.usuario) {
+        estado.usuario = 'sessão restaurada';
+      }
+      await detectarPapel();
+      atualizarSessao();
+      await carregarPedidos();
+      await carregarSaude();
+      await carregarMetricasCache();
+      await carregarMetricasLlm();
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', iniciar);
+})();
+</script>
+{% endverbatim %}
+</body>
+</html>

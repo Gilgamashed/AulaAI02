@@ -11,6 +11,7 @@ from django.db.models import Count
 from django.http import Http404, JsonResponse
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from django.views.generic import TemplateView
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -67,6 +68,22 @@ def health(request):
             else None,
         }
     )
+
+
+class AppFrontendView(TemplateView):
+    """Mock de front-end servido same-origin pela própria API (Aula 25).
+
+    A página é uma ferramenta de demonstração: HTML/CSS/JS inline, sem build
+    e sem CORS. Nenhuma credencial é injetada no template; a `GEMINI_API_KEY`
+    fica restrita ao processo do servidor.
+    """
+
+    template_name = "core/app.html"
+
+    def get_context_data(self, **kwargs):
+        contexto = super().get_context_data(**kwargs)
+        contexto["debug"] = settings.DEBUG
+        return contexto
 
 
 # =====================================================================
