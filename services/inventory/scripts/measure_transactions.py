@@ -14,6 +14,7 @@ Etapas:
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import text
 
@@ -142,7 +143,8 @@ def inspect_schema() -> None:
         """
     )
     with engine.connect() as conn:
-        rows = conn.execute(query).scalars().all()
+        resultado: Any = conn.execute(query).scalars().all()
+    rows: list[str] = [str(nome) for nome in resultado]
     print("\nTabelas no schema 'public' (coexistência Django + Alembic):")
     for name in rows:
         print(f"  - {name}")

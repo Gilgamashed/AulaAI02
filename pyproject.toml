@@ -12,6 +12,37 @@
 select = ["E4", "E7", "E9", "F"]
 
 # ====================================================================
+# Tipos (mypy)
+# ====================================================================
+# `api` entra no caminho de busca para que `config.*` e `core.*` sejam
+# resolvidos quando o comando é executado da raiz (`mypy api services`).
+# `explicit_package_bases` evita que o mypy trate `api/` e `services/` como
+# pacotes implícitos e permite checar os dois serviços no mesmo processo.
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "api,services/inventory"
+explicit_package_bases = true
+namespace_packages = true
+warn_unused_ignores = false
+plugins = ["mypy_django_plugin.main"]
+
+[[tool.mypy.overrides]]
+module = [
+    "pika",
+    "pika.*",
+    "django_filters",
+    "django_filters.*",
+    "pandas",
+    "pandas.*",
+    "streamlit",
+    "streamlit.*",
+]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings_test"
+
+# ====================================================================
 # Configuração do pytest e da cobertura de código (Aula 12).
 #
 # Fica na raiz — e não em `api/` ou `services/inventory/` — porque a suíte

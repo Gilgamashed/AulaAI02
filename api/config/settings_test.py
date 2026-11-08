@@ -45,6 +45,11 @@ from .settings import *  # noqa: F403 — herda tudo o que não é isolado abaix
 # A suíte quer exercitar a montagem real de chaves, não um caminho paralelo
 # que só o teste conhece, por isso as configurações abaixo são as mesmas de
 # produção (ver `config.settings`).
+#
+# O cache de dedupe é LocMem abaixo, mas o TTL é o mesmo da produção para que
+# a janela de idempotência testada seja a janela real.
+DEDUPE_TTL_SEGUNDOS = 86400
+
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
@@ -112,10 +117,6 @@ JWT_SIGNING_KEY = "chave-de-assinatura-de-teste-nao-usar-em-producao"
 # valor inventado faz a suíte exercitar o mesmo caminho de código da
 # produção; quem impede a conexão é o mock `broker_capturado` do conftest.
 MENSAGERIA_BROKER = "kafka"
-
-# O cache de dedupe é LocMem acima, mas o TTL é o mesmo da produção para que
-# a janela de idempotência testada seja a janela real.
-DEDUPE_TTL_SEGUNDOS = 86400
 
 # =====================================================================
 # 5) Banco de teste efêmero

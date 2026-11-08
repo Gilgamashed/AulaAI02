@@ -121,14 +121,20 @@ class Command(BaseCommand):
                     break
 
                 cabecalhos = dict(kafka_produtor.cabecalhos_de(mensagem))
-                corpo = (mensagem.value() or b"").decode("utf-8", errors="replace")
+                valor = mensagem.value()
+                corpo = (
+                    valor.decode("utf-8", errors="replace")
+                    if valor is not None
+                    else ""
+                )
+                chave = mensagem.key()
                 mensagens.append(
                     {
                         "particao": mensagem.partition(),
                         "offset": mensagem.offset(),
                         "chave": (
-                            mensagem.key().decode("utf-8", errors="replace")
-                            if mensagem.key()
+                            chave.decode("utf-8", errors="replace")
+                            if chave is not None
                             else None
                         ),
                         "tentativa": cabecalhos.get(HEADER_TENTATIVA, "?"),

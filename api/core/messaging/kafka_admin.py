@@ -375,10 +375,12 @@ def descrever(
                 topicos.append({"topico": nome, "existe": False, "particoes": []})
                 continue
 
-            particoes = []
+            particoes: list[dict[str, Any]] = []
             for indice in range(len(encontrado.partitions)):
                 marca = TopicPartition(nome, indice)
                 inicio, fim = consumidor.get_watermark_offsets(marca, timeout=10)
+                inicio = inicio or 0
+                fim = fim or 0
                 commit = confirmados.get(f"{nome}:{indice}")
                 particoes.append(
                     {

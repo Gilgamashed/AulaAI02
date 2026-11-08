@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 from django.db.models import Avg, Count, Max, Min
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
@@ -168,17 +170,23 @@ class ItemDetalheSerializer(serializers.ModelSerializer):
             preco_maximo=Max("price"),
         )
 
-    def get_itens_mais_caros(self, obj: Item) -> list:
+    def get_itens_mais_caros(self, obj: Item) -> list[Any]:
         """Top 3 por preço dentro da mesma categoria do item."""
-        return ItemResumoSerializer(
-            obj.category.items.order_by("-price", "id")[:3], many=True
-        ).data
+        return cast(
+            "list[Any]",
+            ItemResumoSerializer(
+                obj.category.items.order_by("-price", "id")[:3], many=True
+            ).data,
+        )
 
-    def get_itens_recentes(self, obj: Item) -> list:
+    def get_itens_recentes(self, obj: Item) -> list[Any]:
         """Os 3 itens mais recentes da mesma categoria do produto."""
-        return ItemResumoSerializer(
-            obj.category.items.order_by("-created_at", "id")[:3], many=True
-        ).data
+        return cast(
+            "list[Any]",
+            ItemResumoSerializer(
+                obj.category.items.order_by("-created_at", "id")[:3], many=True
+            ).data,
+        )
 
 
 # =====================================================================

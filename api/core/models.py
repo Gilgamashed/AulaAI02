@@ -304,6 +304,11 @@ class Pagamento(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Atributo efêmero preenchido pela view antes de publicar o
+    # `PagamentoRegistrado`: escolhe o canal da notificação sem transformá-lo
+    # em coluna do pagamento (quem persiste o canal é a `Notificacao`).
+    canal_notificacao: str
+
     class Meta:
         ordering = ["-created_at"]
         verbose_name = "pagamento"

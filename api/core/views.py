@@ -3,7 +3,7 @@ import json
 import logging
 import uuid
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -930,7 +930,8 @@ class CacheMetricsView(APIView):
         )
 
     def _key_prefix(self) -> str:
-        return settings.CACHES["default"].get("KEY_PREFIX", "")
+        cache = cast(dict[str, Any], settings.CACHES["default"])
+        return str(cache.get("KEY_PREFIX", ""))
 
 
 # =====================================================================

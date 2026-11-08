@@ -650,7 +650,15 @@ escada de reentrega, o mesmo commit manual, a mesma DLQ) atender o
         banco é a única autoridade sobre o estado atual.
         """
         if self.fluxo == FLUXO_PAGAMENTOS:
+            if not isinstance(evento, PagamentoRegistrado):
+                raise MensagemIncorreta(
+                    f"evento '{evento.evento}' não pertence ao fluxo '{self.fluxo}'"
+                )
             return self._aplicar_efeito_pagamento(evento, tentativa)
+        if not isinstance(evento, PedidoCriado):
+            raise MensagemIncorreta(
+                f"evento '{evento.evento}' não pertence ao fluxo '{self.fluxo}'"
+            )
         return self._aplicar_efeito_pedido(evento, tentativa)
 
     def _aplicar_efeito_pedido(self, evento: PedidoCriado, tentativa: int) -> bool:
@@ -864,7 +872,7 @@ escada de reentrega, o mesmo commit manual, a mesma DLQ) atender o
         mensagem: Any,
         cabecalhos: list[tuple[str, str]],
         corpo: bytes,
-        evento: PedidoCriado,
+        evento: PedidoCriado | PagamentoRegistrado,
         tentativa: int,
         erro: Exception,
     ) -> None:

@@ -106,8 +106,8 @@ def listar_endpoints(
     if data_fim:
         consulta = consulta.where(requisicao_metrica.c.created_at <= _fim_do_dia(data_fim))
     with (engine or get_engine()).connect() as conexao:
-        linhas = conexao.execute(consulta).scalars().all()
-    return [str(linha) for linha in linhas]
+        resultado: Any = conexao.execute(consulta).scalars().all()
+    return [str(linha) for linha in resultado]
 
 
 def carregar_metricas(

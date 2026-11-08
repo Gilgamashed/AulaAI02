@@ -8,6 +8,7 @@ PostgreSQL (decisão da Aula 6).
 """
 
 from logging.config import fileConfig
+from typing import Any
 
 from sqlalchemy import engine_from_config, pool
 
@@ -28,7 +29,13 @@ config.set_section_option(config.config_ini_section, "sqlalchemy.url", get_sqlal
 target_metadata = Base.metadata
 
 
-def include_object(obj, name: str, type_: str, reflected: bool, compare_to) -> bool:
+def include_object(
+    obj: Any,
+    name: str | None,
+    type_: Any,
+    reflected: bool,
+    compare_to: Any,
+) -> bool:
     """Restringe o autogenerate às tabelas do próprio microserviço.
 
     Tabelas fora do metadata do inventory (caso do Django) são ignoradas — e

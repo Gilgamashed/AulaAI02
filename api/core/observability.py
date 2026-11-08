@@ -83,7 +83,7 @@ class RegistrarMetricasMiddleware:
 
     @staticmethod
     def _registrar(
-        metodo: str,
+        metodo: str | None,
         endpoint: str,
         status_code: int,
         latencia_ms: float,

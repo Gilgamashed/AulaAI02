@@ -23,7 +23,7 @@ re-exportam.
 from __future__ import annotations
 
 
-def descrever(exc: BaseException) -> str:
+def descrever(exc: object) -> str:
     """Devolve `TipoDaExcecao: mensagem`, ou só o tipo se a mensagem for vazia.
 
     Serve para todos os campos `erro`/`motivo` do logger `core.messaging`,

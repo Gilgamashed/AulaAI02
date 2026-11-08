@@ -72,6 +72,13 @@ jobs:
       DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY || 'ci-insecure-synapseshop' }}
       DJANGO_DEBUG: "False"
       MENSAGERIA_BROKER: kafka
+      # A suíte nunca chama o Gemini, mesmo que o repositório ganhe a chave
+      # como secret no futuro.
+      LLM_PROVIDER: mock
+      GEMINI_API_KEY: ""
+      LLM_MODEL: mock
+      LLM_MODEL_SQL: mock-sql
+      LLM_MODEL_DOCS: mock-docs
       # Mesmos limites fixados no serviço `tests` do docker-compose.yml.
       ASK_SQL_MAX_LINHAS: "200"
       ASK_SQL_TIMEOUT_MS: "3000"
@@ -102,6 +109,9 @@ jobs:
 
       - name: Lint (ruff)
         run: python -m ruff check .
+
+      - name: Tipos (mypy)
+        run: python -m mypy api services dashboard
 
       - name: Testes (pytest + cobertura)
         # `reports/` precisa existir antes de o pytest abrir junit/coverage.

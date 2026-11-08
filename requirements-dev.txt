@@ -33,3 +33,13 @@ httpx>=0.28,<1.0
 # seleção de regras em `[tool.ruff.lint]` é fixa, mas uma versão nova pode
 # mudar a semântica de uma regra e reprovar código que já passava.
 ruff==0.16.8
+
+# --- Tipos -------------------------------------------------------------
+# mypy e stubs do Django/DRF: o gate `mypy api services` (Aula 25) precisa
+# enxergar os campos dos models, os serializers e as views, em vez de tratar
+# tudo como `Any` por falta de stubs. As versões acompanham Django 5.2 e DRF
+# 3.16–3.18; subir django-stubs para 6.x exigiria Django 6.
+mypy==2.3.1
+django-stubs==5.2.9
+django-stubs-ext==5.2.9
+djangorestframework-stubs==3.16.9
