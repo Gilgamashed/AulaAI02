@@ -27,7 +27,7 @@ from .llm import (
     criar_llm_service,
 )
 from .llm.metricas import llm_metrics
-from .llm.servico import modelos_efetivos
+from .llm.servico import modelos_efetivos, provedor_primario
 from .messaging import broker as mensageria
 from .models import Category, Item, Notificacao, Pagamento, Pedido
 from .permissions import IsAdminRole
@@ -1067,11 +1067,24 @@ class LlmMetricsView(APIView):
 
     def get(self, request) -> Response:
         modelos = modelos_efetivos(settings)
+        total = llm_metrics.snapshot()
+        configurado = str(getattr(settings, "LLM_PROVIDER", "auto")).strip().lower()
+        try:
+            primario = provedor_primario(settings)
+        except LlmConfiguracaoInvalida:
+            primario = "mock"
+        efetivo = total.get("provedor_efetivo") or primario
         return Response(
             {
-                "provedor": getattr(settings, "LLM_PROVIDER", "mock"),
+                # Compatibilidade: `provedor` continua sendo o configurado.
+                "provedor": configurado,
+                "provedor_configurado": configurado,
+                "provedor_efetivo": efetivo,
                 "modelo": modelos["assist"],
                 "modelos": modelos,
+                "fallbacks": total.get("fallbacks", 0),
+                "ultimo_motivo_fallback": total.get("ultimo_motivo_fallback", ""),
+                "fallback_ativo": total.get("fallback_ativo", False),
                 "timeout_segundos": getattr(settings, "LLM_TIMEOUT_SEGUNDOS", 5.0),
                 "redacao_ativa": getattr(settings, "LLM_REDACAO_ATIVA", True),
                 "custo_por_1m_tokens": {
@@ -1080,6 +1093,6 @@ class LlmMetricsView(APIView):
                         settings, "LLM_CUSTO_OUTPUT_POR_1M_TOKENS", 0.0
                     ),
                 },
-                "total": llm_metrics.snapshot(),
+                "total": total,
             }
         )

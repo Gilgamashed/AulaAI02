@@ -25,8 +25,10 @@ from .erros import (
     LlmErro,
     LlmErroCliente,
     LlmErroServidor,
+    LlmModeloIndisponivel,
     LlmRateLimit,
     LlmTimeout,
+    RespostaBloqueada,
     RespostaInvalida,
 )
 from .portas import LlmResposta
@@ -132,8 +134,9 @@ class ProvedorGemini:
 
         motivo_bloqueio = _motivo_bloqueio(resposta)
         if motivo_bloqueio is not None:
-            raise RespostaInvalida(
-                f"Gemini bloqueou a resposta ({motivo_bloqueio})"
+            raise RespostaBloqueada(
+                f"Gemini bloqueou a resposta ({motivo_bloqueio})",
+                motivo=motivo_bloqueio,
             )
 
         texto = _texto_da_resposta(resposta)
@@ -263,6 +266,11 @@ def _traduzir_erro(exc: Exception) -> LlmErro:
         return LlmRateLimit(
             "Gemini aplicou rate limit (HTTP 429).",
             retry_after=_retry_after(exc),
+        )
+    if codigo == 404:
+        return LlmModeloIndisponivel(
+            "Gemini não encontrou o modelo configurado (HTTP 404); "
+            "confira LLM_MODEL*."
         )
     if codigo is not None and 400 <= codigo < 500:
         return LlmErroCliente(f"Gemini rejeitou a requisição (HTTP {codigo}).")

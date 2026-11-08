@@ -29,10 +29,12 @@ from .erros import (
     LlmErroCliente,
     LlmErroServidor,
     LlmIndisponivel,
+    LlmModeloIndisponivel,
     LlmRateLimit,
     LlmRecuperavel,
     LlmTerminal,
     LlmTimeout,
+    RespostaBloqueada,
     RespostaInvalida,
     descrever,
 )
@@ -43,6 +45,7 @@ from .mock_sql import ProvedorMockSql
 from .portas import LlmResposta, ProvedorLlm
 from .retry import RetryPolicy
 from .servico import (
+    PROVIDER_AUTO,
     PROVIDER_GEMINI,
     PROVIDER_MOCK,
     TAREFA_ASSIST,
@@ -50,6 +53,8 @@ from .servico import (
     TAREFA_SQL,
     LlmService,
     criar_llm_service,
+    modelos_efetivos,
+    provedor_primario,
 )
 
 __all__ = [
@@ -62,12 +67,14 @@ __all__ = [
     "LlmErroCliente",
     "LlmErroServidor",
     "LlmIndisponivel",
+    "LlmModeloIndisponivel",
     "LlmRateLimit",
     "LlmRecuperavel",
     "LlmResposta",
     "LlmService",
     "LlmTerminal",
     "LlmTimeout",
+    "PROVIDER_AUTO",
     "PROVIDER_GEMINI",
     "PROVIDER_MOCK",
     "ProvedorGemini",
@@ -75,6 +82,7 @@ __all__ = [
     "ProvedorMock",
     "ProvedorMockDocs",
     "ProvedorMockSql",
+    "RespostaBloqueada",
     "RespostaInvalida",
     "RetryPolicy",
     "TAREFA_ASSIST",
@@ -82,4 +90,6 @@ __all__ = [
     "TAREFA_SQL",
     "criar_llm_service",
     "descrever",
+    "modelos_efetivos",
+    "provedor_primario",
 ]

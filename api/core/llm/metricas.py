@@ -54,6 +54,15 @@ class LlmMetrics:
     tokens_output: int = 0
     custo_usd: float = 0.0
     latencia_ms_total: float = 0.0
+    fallbacks: int = 0
+    fallback_sucessos: int = 0
+    fallback_falhas: int = 0
+    fallback_tokens_prompt: int = 0
+    fallback_tokens_output: int = 0
+    fallback_custo_usd: float = 0.0
+    provedor_efetivo: str = ""
+    ultimo_motivo_fallback: str = ""
+    fallback_ativo: bool = False
 
     def as_dict(self) -> dict:
         dados = asdict(self)
@@ -98,6 +107,39 @@ class LlmMetricsColetor:
         """Fail-fast por circuito aberto: não soma em `chamadas`."""
         with self._lock:
             self._contadores.bloqueadas += 1
+
+    def record_fallback(self, motivo: str, *, provedor: str = "mock") -> None:
+        """Registra que a chamada atual caiu para o provedor de fallback."""
+        with self._lock:
+            self._contadores.fallbacks += 1
+            self._contadores.ultimo_motivo_fallback = motivo[:200]
+            self._contadores.provedor_efetivo = provedor
+            self._contadores.fallback_ativo = True
+
+    def record_fallback_sucesso(
+        self,
+        *,
+        tokens_prompt: int = 0,
+        tokens_output: int = 0,
+        custo_usd: float = 0.0,
+    ) -> None:
+        """Acumula o consumo do fallback sem misturar com os contadores primários."""
+        with self._lock:
+            self._contadores.fallback_sucessos += 1
+            self._contadores.fallback_tokens_prompt += tokens_prompt
+            self._contadores.fallback_tokens_output += tokens_output
+            self._contadores.fallback_custo_usd += custo_usd
+
+    def record_fallback_falha(self) -> None:
+        """O fallback também falhou; a resposta final será 503."""
+        with self._lock:
+            self._contadores.fallback_falhas += 1
+
+    def marcar_primario_sucesso(self, provedor: str) -> None:
+        """Última chamada voltou ao provedor primário com sucesso."""
+        with self._lock:
+            self._contadores.provedor_efetivo = provedor
+            self._contadores.fallback_ativo = False
 
     def snapshot(self) -> dict:
         with self._lock:

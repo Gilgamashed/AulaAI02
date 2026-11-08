@@ -65,8 +65,28 @@ class LlmErroCliente(LlmTerminal):
     """Requisição rejeitada pelo provedor (HTTP 4xx no provedor real)."""
 
 
+class LlmModeloIndisponivel(LlmErroCliente):
+    """O modelo pedido não está disponível no provedor (HTTP 404).
+
+    É terminal para retry, mas elegível ao fallback de disponibilidade: não
+    adianta repetir o mesmo nome de modelo, mas o mock pode atender a demo.
+    """
+
+
 class RespostaInvalida(LlmTerminal):
     """O provedor respondeu, mas o corpo não segue o contrato esperado."""
+
+
+class RespostaBloqueada(RespostaInvalida):
+    """O provedor bloqueou a resposta por segurança/conteúdo.
+
+    Distinta de resposta vazia/malformada de propósito: bloqueio de segurança
+    é terminal e **não** pode cair para o mock.
+    """
+
+    def __init__(self, mensagem: str, *, motivo: str = "") -> None:
+        super().__init__(mensagem)
+        self.motivo = motivo
 
 
 class LlmIndisponivel(LlmErro):
