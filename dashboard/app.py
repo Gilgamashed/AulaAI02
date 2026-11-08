@@ -1,7 +1,8 @@
-"""Painel analítico Streamlit (Aula 19).
+"""Painel analítico Streamlit (Aulas 19, 20 e 25).
 
-Filtros dinâmicos, cache com TTL, tabelas e gráficos. Todas as consultas
-usam o módulo seguro parametrizado.
+Filtros dinâmicos, cache com TTL, tabelas e gráficos. Todas as consultas usam
+o módulo seguro parametrizado. A Aula 25 acrescenta os indicadores de vendas:
+receita total, ticket médio, receita por dia e produtos mais vendidos.
 """
 
 from __future__ import annotations
@@ -11,7 +12,11 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
-from dashboard.queries import carregar_pedidos
+from dashboard.queries import (
+    agregar_vendas,
+    carregar_nomes_produtos,
+    carregar_pedidos,
+)
 from dashboard.security import STATUS_PEDIDO
 
 st.set_page_config(
@@ -39,10 +44,26 @@ def _carregar_pedidos_cache(
         pedido_id=pedido_id,
         ordem_coluna=ordem_coluna,
         ordem_direcao=ordem_direcao,
+        incluir_itens=True,
     )
 
 
-st.title("SynapseShop - Painel de Pedidos")
+@st.cache_data(ttl=60, show_spinner=False)
+def _carregar_vendas_cache(
+    registros: list[dict],
+) -> dict:
+    """Agrega os indicadores de vendas com o mesmo cache de 60 s da listagem."""
+    skus = [
+        str(item.get("sku"))
+        for registro in registros
+        for item in (registro.get("itens") or [])
+        if isinstance(item, dict) and item.get("sku")
+    ]
+    nomes = carregar_nomes_produtos(skus)
+    return agregar_vendas(registros, nomes)
+
+
+st.title("SynapseShop - Painel de Vendas")
 st.caption("Conexão segura com SSL/TLS, consultas parametrizadas e cache (TTL 60s)")
 
 with st.sidebar:
@@ -72,6 +93,7 @@ try:
         ordem_coluna,
         ordem_direcao,
     )
+    vendas = _carregar_vendas_cache(registros)
 except Exception as exc:
     st.error("Não foi possível carregar os dados com os filtros atuais.")
     st.caption(str(exc))
@@ -85,15 +107,55 @@ df = pd.DataFrame(registros)
 if "total" in df.columns:
     df["total"] = pd.to_numeric(df["total"])
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total de registros", len(df))
-col2.metric("Valor total", f"R$ {df['total'].sum():,.2f}" if "total" in df.columns else "N/A")
-col3.metric("Pedidos aprovados/processados", int((df["status"] == "processado").sum()) if "status" in df.columns else 0)
-col4.metric("Pedidos com falha", int((df["status"] == "falha").sum()) if "status" in df.columns else 0)
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("Receita total", f"R$ {vendas['receita_total']:,.2f}")
+col2.metric("Ticket médio", f"R$ {vendas['ticket_medio']:,.2f}")
+col3.metric("Pedidos processados", vendas["pedidos_processados"])
+col4.metric(
+    "Pedidos com falha",
+    int((df["status"] == "falha").sum()) if "status" in df.columns else 0,
+)
+col5.metric("Total de registros", len(df))
 
-st.subheader("Tabela de pedidos")
-st.dataframe(df, use_container_width=True, hide_index=True)
+st.subheader("Receita por dia")
+receita_dia = pd.DataFrame(vendas["receita_por_dia"])
+if receita_dia.empty:
+    st.info("Nenhum pedido processado no período selecionado.")
+else:
+    st.bar_chart(receita_dia.set_index("data")["receita"], use_container_width=True)
+
+st.subheader("Produtos mais vendidos")
+produtos = pd.DataFrame(vendas["produtos"])
+if produtos.empty:
+    st.info("Nenhum item de pedido processado no período selecionado.")
+else:
+    por_quantidade = produtos.sort_values(
+        by=["quantidade", "receita"], ascending=[False, False]
+    ).head(10)
+    por_receita = produtos.sort_values(
+        by=["receita", "quantidade"], ascending=[False, False]
+    ).head(10)
+    aba_quantidade, aba_receita = st.tabs(["Por quantidade", "Por receita"])
+    with aba_quantidade:
+        st.dataframe(
+            por_quantidade[["sku", "nome", "quantidade", "receita"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+    with aba_receita:
+        st.dataframe(
+            por_receita[["sku", "nome", "quantidade", "receita"]],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 st.subheader("Quantidade por status")
 contagem_status = df["status"].value_counts()
 st.bar_chart(contagem_status)
+
+st.subheader("Tabela de pedidos")
+st.dataframe(
+    df.drop(columns=["itens"], errors="ignore"),
+    use_container_width=True,
+    hide_index=True,
+)
