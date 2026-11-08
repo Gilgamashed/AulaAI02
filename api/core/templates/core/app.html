@@ -333,6 +333,7 @@
     </div>
     <div class="cartao-metrica">
       <h4>IA</h4>
+      <p id="llm-resumo" class="mudo">Não consultado.</p>
       <pre id="llm-saida">Não consultado.</pre>
     </div>
     <p class="links">
@@ -1131,15 +1132,30 @@
     }
   }
 
+  function renderizarMetricasLlm(dados) {
+    const resumo = el('llm-resumo');
+    if (!resumo) return;
+    const configurado = dados.provedor_configurado || dados.provedor || '—';
+    const efetivo = dados.provedor_efetivo || '—';
+    const modelo = (dados.modelos && dados.modelos.assist) || dados.modelo || '—';
+    const fallback = dados.fallback_ativo ? 'sim' : 'não';
+    const motivo = dados.ultimo_motivo_fallback ? ' — ' + dados.ultimo_motivo_fallback : '';
+    resumo.textContent = 'Configurado: ' + configurado + ' | Efetivo: ' + efetivo +
+      ' | Modelo: ' + modelo + ' | Fallback: ' + fallback + motivo;
+  }
+
   async function carregarMetricasLlm() {
     if (estado.papel !== 'admin') {
+      if (el('llm-resumo')) el('llm-resumo').textContent = 'Restrito ao papel admin.';
       el('llm-saida').textContent = 'Restrito ao papel admin.';
       return;
     }
     try {
       const { dados } = await requisitar('/llm/metrics/');
+      renderizarMetricasLlm(dados);
       el('llm-saida').textContent = JSON.stringify(dados, null, 2);
     } catch (erro) {
+      if (el('llm-resumo')) el('llm-resumo').textContent = erro.message;
       el('llm-saida').textContent = erro.message;
     }
   }
@@ -1203,6 +1219,7 @@
     carregarPedidos();
     el('cache-saida').textContent = 'Não consultado.';
     el('llm-saida').textContent = 'Não consultado.';
+    if (el('llm-resumo')) el('llm-resumo').textContent = 'Não consultado.';
   }
 
   function configurarEventos() {
