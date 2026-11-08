@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SynapseShop API
-  version: 1.24.0
+  version: 1.25.0
   description: |
     Documentação OpenAPI do MVP SynapseShop (Aula 24).
 
@@ -1224,11 +1224,15 @@ paths:
               example:
                 provedor: mock
                 modelo: mock
+                modelos:
+                  assist: mock
+                  sql: mock-sql
+                  docs: mock-docs
                 timeout_segundos: 5.0
                 redacao_ativa: true
                 custo_por_1m_tokens:
-                  input_usd: 5.0
-                  output_usd: 15.0
+                  input_usd: 0.30
+                  output_usd: 2.50
                 total:
                   chamadas: 10
                   bloqueadas: 1
@@ -2451,9 +2455,21 @@ components:
       properties:
         provedor:
           type: string
-          description: Provedor configurado (hoje apenas `mock`).
+          description: Provedor configurado (`mock` ou `gemini`).
         modelo:
           type: string
+          description: Modelo efetivo da tarefa `assist` (já resolve defaults do provedor).
+        modelos:
+          type: object
+          description: Modelo efetivo por tarefa de IA.
+          properties:
+            assist:
+              type: string
+            sql:
+              type: string
+            docs:
+              type: string
+          required: [assist, sql, docs]
         timeout_segundos:
           type: number
           description: Espera máxima por chamada (guarda genérica).

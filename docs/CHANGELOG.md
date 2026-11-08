@@ -5,6 +5,50 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.25.0] - 2026-11-08 — Fechamento do MVP, Demo e IA Real (Gemini)
+
+### Adicionado
+- **Mock de front-end em `GET /app/` (Aula 25):** página única servida pelo Django, same-origin, com HTML/CSS/JS inline e sem build, CORS ou container novo. Cobre login/logout com JWT em `sessionStorage`, refresh automático em `401`, catálogo com busca/filtro/ordenação e CRUD por papel, carrinho com `Idempotency-Key` e reenvio idempotente, pagamento com polling/notificações, abas de IA (`/assist/`, `/ask_sql/`, `/ask_docs/`), cartões de saúde/cache/métricas e links para Streamlit/Swagger/ReDoc/OpenAPI. O checkbox de DLQ só é renderizado com `DEBUG=True`; dados da API entram via `textContent`/DOM, nunca `innerHTML`.
+- **View `AppFrontendView` e rota `app/`:** template `api/core/templates/core/app.html`; a `GEMINI_API_KEY` permanece restrita ao processo do servidor.
+- **Provedor Gemini real:** `api/core/llm/gemini.py` (`ProvedorGemini`) implementa a porta `ProvedorLlm` com `google-genai`, cliente injetável, modelo padrão `gemini-3.5-flash`, mapeamento de erros (`401/403` → configuração inválida, `400/404` → cliente, `429` → rate limit com `retry_after`, `5xx` → servidor, timeout/conexão e resposta vazia) e import tardio do SDK. O adaptador envia `thinking_config.thinking_budget=0` para manter a latência previsível e impedir que tokens de raciocínio consumam `max_output_tokens`. Também inspeciona `finish_reason` e `prompt_feedback.block_reason`, convertendo bloqueios de segurança/conteúdo em `RespostaInvalida` (HTTP 502). A resiliência (timeout, retry com backoff+jitter, circuit breaker e métricas) continua em `LlmService`.
+- **Telemetria com modelo efetivo:** `modelos_efetivos()` resolve, sem instanciar cliente, o modelo realmente usado por `assist`, `sql` e `docs` (inclusive a troca de `mock*` por `gemini-3.5-flash`). `GET /api/v1/llm/metrics/` mantém `modelo` (assist) e passa a expor `modelos: {assist, sql, docs}`.
+- **Qualidade de tipos no gate:** `pyproject.toml` configura mypy com `mypy_path`, plugin do Django e stubs de Django/DRF; `requirements-dev.txt` fixa `mypy`, `django-stubs`, `django-stubs-ext` e `djangorestframework-stubs`; o CI executa `mypy api services dashboard`.
+- **Seleção por `LLM_PROVIDER=mock|gemini`:** `criar_llm_service` mantém mocks como padrão e singletons/breakers independentes por tarefa; valores desconhecidos falham com `LlmConfiguracaoInvalida`. Não há fallback automático — o plano B é trocar explicitamente para `mock`.
+- **Comando `manage.py seed_demo`:** massa idempotente com 4 categorias, 12 produtos ativos, 20 pedidos históricos nos últimos 30 dias, 14 pagamentos (12 aprovados/2 recusados) e 14 notificações; exige `seed_auth`, aceita `--silent` e não apaga dados existentes.
+- **Dashboard de vendas:** `dashboard/queries.py` lê a coluna JSON `itens`, traduz SKUs pelo catálogo e agrega receita total, ticket médio, pedidos processados, receita por dia e produtos mais vendidos (quantidade e receita), apenas para pedidos `processado`. `dashboard/app.py` exibe os indicadores, mantendo filtros, ordenação segura, limite e cache de 60 s.
+- **Smoke ponta a ponta `scripts/validar_mvp.py`:** 12 passos com biblioteca padrão (saúde API/inventory, login dos dois usuários, cache, pedido, idempotência, pagamento, worker/notificação, três recursos de IA, `/app/` e dashboard), `--skip-ai`, timeouts configuráveis, resumo JSON (`ok`, `passos`, `skipped`, `falhas`) e exit code diferente de zero em falha obrigatória.
+- **Documentação de apresentação:** `docs/apresentacao/checklist-mvp.md` (matriz dos dez itens do MVP com implementação, testes, evidência, status e limitações), `docs/apresentacao/roteiro-demo.md` (ordem, tempos e planos B) e `docs/aulas/25-ia-real-gemini.md` (arquitetura, configuração, testes, troubleshooting e limitações).
+- **Testes:** `tests/unit/test_llm_gemini.py` (22 casos), `tests/unit/test_seed_demo.py` (7), `tests/unit/test_dashboard_sales.py` (6), `tests/unit/test_validar_mvp.py` (5) e `tests/integration/test_app_frontend.py` (3); a suíte completa fecha em **532 testes**.
+
+### Alterado
+- **`requirements.txt`:** `google-genai>=1.0,<2.0`.
+- **`api/config/settings.py`:** `GEMINI_API_KEY`; a fábrica usa `LLM_PROVIDER` e os modelos por tarefa.
+- **`.env.example`, `docker-compose.yml` e `.env` local:** documentam/plumbam `GEMINI_API_KEY`, `LLM_PROVIDER` e modelos; o serviço `tests` força `LLM_PROVIDER=mock` e chave vazia para nunca chamar a API real.
+- **`api/config/urls.py` e `api/core/views.py`:** rota e view do mock de front-end; a view do `/assist/` pede resposta em português do Brasil.
+- **`api/core/ask_docs/prompt.py`:** regras no `system` e contexto na mensagem `user`, com instrução explícita de tratar o CONTEXTO como dado não confiável e ignorar instruções contidas nele.
+- **`docs/openapi.yaml`:** versão `1.25.0`; `LlmMetrics` ganhou `modelos` (modelo efetivo por tarefa).
+- **`README.md`:** `seed_demo`, `/app/`, smoke do MVP, configuração Gemini, seção da Aula 25 e índice de aulas.
+- **`AGENTS.md`:** comandos do `seed_demo`/`validar_mvp`, estrutura do front-end, regra de IA mock/Gemini e gate de tipos.
+- **`dashboard/app.py` e `dashboard/queries.py`:** indicadores de vendas da Aula 25.
+- **`api/config/settings.py`, `.env.example`, `README.md` e `docs/aulas/25-ia-real-gemini.md`:** timeout sugerido de 30 s para o Gemini real (o prompt de SQL é o mais longo) e custos de exemplo `0.30/2.50` por 1M de tokens.
+- **`requirements-dev.txt`, `pyproject.toml` e `.github/workflows/ci.yml`:** dependências, configuração e etapa de mypy.
+- **`dashboard/performance.py`:** anotação de tipo na consulta de endpoints.
+
+### Corrigido
+- **`finish_reason` bloqueado:** respostas com `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII` e correlatos viram `RespostaInvalida`, mesmo que tragam texto parcial.
+- **Métricas do modelo efetivo:** `/api/v1/llm/metrics/` não reporta mais `mock` quando `LLM_PROVIDER=gemini` e `LLM_MODEL` ainda está no default.
+- **Prompt injection no RAG:** o contexto deixou de ser enviado como instrução de sistema; os testes cobrem um trecho malicioso.
+- **Vazamento em logs:** teste com `caplog` garante que a chave não aparece em exceções nem em logs.
+- **Latência do `/ask_sql/`:** a validação real mostrou 503 com 20 s/1 tentativa e 200 com 30 s/2 tentativas; a recomendação e o exemplo do `.env` passaram a 30 s.
+
+### Notas
+- O mock continua sendo o padrão de testes/CI e o plano B da apresentação; nenhum teste automatizado depende de rede ou da chave real.
+- O `gemini-2.5-flash`, sugerido na primeira versão da aula, foi aposentado para chaves novas durante a validação (HTTP 404). O padrão passou a ser `gemini-3.5-flash`.
+- Validação real final: `/assist/`, `/ask_sql/` e `/ask_docs/` responderam **200** com `LLM_PROVIDER=gemini`; o `/ask_sql/` gerou SQL válido e as métricas mostraram `modelos={assist,sql,docs}=gemini-3.5-flash`.
+- Gate local/CI: **532 testes**, cobertura **90,03%**, `ruff check .` e `mypy api services dashboard` verdes.
+- Os embeddings do RAG continuam lexicais (TF-IDF), sem modelo neural.
+- O deploy permanece simulado e `/app/` é um mock de demonstração, não um front-end de produção.
+
 ## [1.24.0] - 2026-11-06 — Assistente de Documentação com RAG
 
 ### Adicionado

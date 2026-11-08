@@ -128,6 +128,21 @@ pedido ➔ pagamento ➔ notificação fica impossível de exercitar. É idempot
 pode repetir à vontade. As credenciais estão na seção
 [Autenticação JWT](docs/autenticacao.md).
 
+Para a apresentação, o `seed_demo` complementa o `seed_auth` com catálogo,
+pedidos históricos, pagamentos e notificações (também idempotente):
+
+```bash
+docker compose exec api python api/manage.py seed_demo
+```
+
+O mock de front-end fica em [http://localhost:8000/app/](http://localhost:8000/app/)
+e o smoke ponta a ponta pode ser executado do host:
+
+```bash
+python scripts/validar_mvp.py
+python scripts/validar_mvp.py --skip-ai
+```
+
 ### Validar a disponibilidade
 
 ```bash
@@ -188,8 +203,10 @@ automaticamente no startup (o banco já está saudável via `depends_on`).
 | `/api/v1/categories/{id}/`     | GET, PUT, PATCH, DELETE   | Detalhe / atualizar / excluir categoria     |
 | `/api/v1/items/`               | GET, POST                 | Listar / criar produtos eletrônicos         |
 | `/api/v1/items/{id}/`          | GET, PUT, PATCH, DELETE   | Detalhe / atualizar / excluir produto       |
+| `/api/v1/assist/`              | POST (autenticado)        | Assistente de suporte (resumo/explicação)   |
 | `/api/v1/ask_sql/`             | POST (admin)              | Pergunta em português → SELECT validado     |
 | `/api/v1/ask_docs/`            | POST (admin)              | Pergunta técnica → resposta RAG com fontes  |
+| `/app/`                        | GET                       | Mock de front-end same-origin (Aula 25)     |
 
 Status codes: **200** OK, **201** Created, **204** No Content, **400** Bad
 Request, **404** Not Found. Validações customizadas: preço não-negativo, SKU no
@@ -233,6 +250,7 @@ mantém o estado atual do projeto e o índice para navegação.
 | 22 | Pipeline de CI/CD com GitHub Actions | [docs/aulas/22-ci-cd.md](docs/aulas/22-ci-cd.md) |
 | 23 | Pipeline avançado: cache, Compose e deploy simulado | [docs/aulas/23-ci-cd-avancado.md](docs/aulas/23-ci-cd-avancado.md) |
 | 24 | Assistente de documentação com RAG | [docs/aulas/24-rag-documentacao.md](docs/aulas/24-rag-documentacao.md) |
+| 25 | Fechamento do MVP, demo e IA real (Gemini) | [docs/aulas/25-ia-real-gemini.md](docs/aulas/25-ia-real-gemini.md) |
 
 ## Documentação útil
 
@@ -478,7 +496,7 @@ para `?branch=main`.
 
 | Job | Runner | O que valida |
 | --- | --- | --- |
-| `test-and-lint` | `ubuntu-latest` | `ruff check .`, suíte `pytest` completa e gate de cobertura de 85% |
+| `test-and-lint` | `ubuntu-latest` | `ruff check .`, `mypy api services dashboard`, suíte `pytest` completa e gate de cobertura de 85% |
 | `docker-build` | `ubuntu-latest` | buildx com cache de camadas, imagem `synapseshop-api:test` e `docker image inspect` |
 | `compose-smoke` | `ubuntu-latest` | sobe `db`, `api` e `dashboard` com `--wait` e roda o smoke de comunicação |
 | `publish` | `ubuntu-latest` | login e push da imagem no DockerHub, com verificação do digest |
@@ -583,8 +601,9 @@ Token** com escopo **Read & Write**. O valor nunca entra no repositório, no
 ### Rodar o equivalente local
 
 ```powershell
-# Lint e suíte
+# Lint, tipos e suíte
 python -m ruff check .
+python -m mypy api services dashboard
 docker compose run --rm tests
 
 # Build da imagem da API
@@ -784,6 +803,63 @@ ASK_DOCS_LOG_LEVEL=INFO
 
 Documentação técnica e roteiro de teste:
 [docs/aulas/24-rag-documentacao.md](docs/aulas/24-rag-documentacao.md).
+
+## Fechamento do MVP, Demo e IA Real (Aula 25)
+
+A Aula 25 fecha o MVP com três entregas complementares: evidências
+reproduzíveis, um mock de front-end para a apresentação e o provedor real
+Gemini na camada de IA.
+
+### Front-end de demonstração
+
+O Django serve `GET /app/` com HTML, CSS e JavaScript inline — same-origin,
+sem CORS, sem build e sem container novo. A página permite:
+
+- login/logout com JWT em `sessionStorage` e renovação automática do access;
+- catálogo com busca, filtro, ordenação e CRUD conforme o papel;
+- carrinho, criação de pedido com `Idempotency-Key` e reenvio idempotente;
+- pagamento, polling do worker e notificações;
+- abas de IA (`/assist/`, `/ask_sql/` e `/ask_docs/`);
+- cartões de saúde, cache e métricas de IA.
+
+### Provedor Gemini
+
+O mock continua sendo o padrão de testes/CI e o plano B da apresentação. Para
+usar o Gemini real, configure o `.env` (nunca versione a chave):
+
+```env
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=sua-chave-do-google-ai-studio
+LLM_MODEL=gemini-3.5-flash
+LLM_MODEL_SQL=gemini-3.5-flash
+LLM_MODEL_DOCS=gemini-3.5-flash
+LLM_TIMEOUT_SEGUNDOS=30.0
+```
+
+A resiliência (timeout, retry e circuit breaker), a redação de PII, a validação
+de SQL e o guardrail do RAG continuam os mesmos. Se o provedor falhar durante a
+demo, volte para `LLM_PROVIDER=mock` e reinicie a API — não há fallback
+silencioso por decisão de projeto.
+
+### Massa demo e smoke
+
+```bash
+docker compose exec api python api/manage.py seed_auth
+docker compose exec api python api/manage.py seed_demo
+docker compose exec api python api/manage.py indexar_docs
+python scripts/validar_mvp.py
+```
+
+O script `validar_mvp.py` executa doze passos (saúde, login, cache, pedido,
+idempotência, pagamento, worker, três recursos de IA, `/app/` e dashboard),
+marca os passos de IA como `SKIP` com `--skip-ai` e devolve exit code diferente
+de zero em qualquer falha obrigatória.
+
+Evidências e roteiro:
+
+- [Checklist do MVP](docs/apresentacao/checklist-mvp.md)
+- [Roteiro da demonstração](docs/apresentacao/roteiro-demo.md)
+- [IA real com Gemini](docs/aulas/25-ia-real-gemini.md)
 
 ## Referências
 
