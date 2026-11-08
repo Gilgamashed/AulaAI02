@@ -522,18 +522,19 @@ PAGAMENTO_PERMITIR_SIMULACAO_FALHA = _env_flag(
 # =====================================================================
 # O item 1 da spec constrói a resiliência da comunicação com o provedor de IA:
 # timeout, retry com backoff exponencial + jitter (3 tentativas) e circuit
-# breaker (closed/open/half-open). A Aula 25 adiciona o provedor real Gemini
-# (`LLM_PROVIDER=gemini`); o mock continua sendo o padrão de testes/CI e o
-# plano B da apresentação.
+# breaker (closed/open/half-open). A Aula 25 adiciona o Gemini como provedor
+# preferencial; `auto` tenta o Gemini e cai para o mock apenas em
+# indisponibilidade técnica. O mock continua sendo o padrão de testes/CI.
 #
-#   LLM_PROVIDER             -> 'mock' (padrão) ou 'gemini'.
+#   LLM_PROVIDER             -> 'auto' (padrão), 'gemini' ou 'mock'.
 #   GEMINI_API_KEY           -> chave do provedor real; nunca versionada.
 #   LLM_MODEL                -> modelo endereçado (assist).
 #   LLM_MODEL_SQL            -> modelo da tarefa de texto-para-SQL.
 #   LLM_MODEL_DOCS           -> modelo do assistente RAG.
 #   LLM_TIMEOUT_SEGUNDOS     -> deadline da guarda genérica do LlmService
-#                               (limiar da spec: <=5s).
-#   LLM_MAX_TENTATIVAS       -> execuções da chamada (spec: 3).
+#                               (20-30s no provedor real; 5s no mock).
+#   LLM_MAX_TENTATIVAS       -> execuções da chamada (padrão: 3). Em `auto`,
+#                               usar 1 ou 2 reduz a espera antes do fallback.
 #   LLM_BACKOFF_BASE_SEGUNDOS / LLM_BACKOFF_FATOR -> base do backoff exponencial.
 #   LLM_BACKOFF_JITTER       -> true ativa o *full jitter* no atraso.
 #   LLM_CB_LIMITE_FALHAS     -> falhas consecutivas para abrir o circuito.
@@ -547,7 +548,7 @@ PAGAMENTO_PERMITIR_SIMULACAO_FALHA = _env_flag(
 #                               ESTIMATIVA de custo por chamada. Os defaults são
 #                               números de exemplo para o Gemini Flash; ajuste
 #                               conforme a tabela vigente do provedor.
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mock").strip().lower()
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "auto").strip().lower()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 LLM_MODEL = os.environ.get("LLM_MODEL", "mock")
 # Aula 21: o texto-para-SQL usa um provedor mock especializado (mesma porta

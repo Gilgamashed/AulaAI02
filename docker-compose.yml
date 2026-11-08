@@ -113,14 +113,15 @@ services:
       # DLQ inexplicável — que foi exatamente o que aconteceu na validação.
       PAGAMENTO_PERMITIR_SIMULACAO_FALHA: ${PAGAMENTO_PERMITIR_SIMULACAO_FALHA:-true}
       MESSAGING_LOG_LEVEL: ${MESSAGING_LOG_LEVEL:-INFO}
-      # Aula 14/25 (camada de IA — llm_service). O mock continua sendo o padrão
-      # de CI e o plano B da apresentação; `LLM_PROVIDER=gemini` ativa o
-      # adaptador real. A chave vem do .env e nunca é embutida na imagem.
-      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      # Aula 14/25 (camada de IA — llm_service). `auto` tenta Gemini e cai
+      # para o mock apenas em indisponibilidade técnica; `gemini` é estrito e
+      # `mock` é determinístico. A chave vem do .env e nunca é embutida na
+      # imagem. O serviço `tests` fixa `mock` abaixo.
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-mock}
-      LLM_TIMEOUT_SEGUNDOS: ${LLM_TIMEOUT_SEGUNDOS:-5.0}
-      LLM_MAX_TENTATIVAS: ${LLM_MAX_TENTATIVAS:-3}
+      LLM_TIMEOUT_SEGUNDOS: ${LLM_TIMEOUT_SEGUNDOS:-30.0}
+      LLM_MAX_TENTATIVAS: ${LLM_MAX_TENTATIVAS:-2}
       LLM_BACKOFF_BASE_SEGUNDOS: ${LLM_BACKOFF_BASE_SEGUNDOS:-1.0}
       LLM_BACKOFF_FATOR: ${LLM_BACKOFF_FATOR:-2.0}
       LLM_BACKOFF_JITTER: ${LLM_BACKOFF_JITTER:-true}
