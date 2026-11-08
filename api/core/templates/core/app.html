@@ -181,6 +181,11 @@
       <select id="catalogo-categoria" aria-label="Filtrar por categoria">
         <option value="">Todas as categorias</option>
       </select>
+      <select id="catalogo-ativo" aria-label="Filtrar por status">
+        <option value="">Todos os status</option>
+        <option value="true">Ativos</option>
+        <option value="false">Inativos</option>
+      </select>
       <select id="catalogo-ordem" aria-label="Ordenar catálogo">
         <option value="-created_at">Mais recentes</option>
         <option value="name">Nome A-Z</option>
@@ -261,6 +266,7 @@
       <button type="submit">Registrar pagamento</button>
     </form>
     <p id="pagamento-status" class="status neutro" role="status"></p>
+    <p id="pagamento-aviso" class="status aviso" role="status" hidden></p>
     <div id="pagamento-resultado"></div>
     <h3>Notificações do pedido</h3>
     <div id="notificacoes-lista" class="mudo">Nenhuma consulta realizada ainda.</div>
@@ -432,11 +438,14 @@
 
   async function renovarToken() {
     if (!estado.refresh) return false;
+    const controller = new AbortController();
+    const temporizador = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       const resposta = await fetch(API + '/auth/token/refresh/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh: estado.refresh })
+        body: JSON.stringify({ refresh: estado.refresh }),
+        signal: controller.signal
       });
       if (!resposta.ok) throw new Error('refresh recusado');
       const dados = await resposta.json();
@@ -447,6 +456,8 @@
     } catch (_erro) {
       limparSessao();
       return false;
+    } finally {
+      clearTimeout(temporizador);
     }
   }
 
@@ -568,9 +579,11 @@
     const params = new URLSearchParams();
     const busca = el('catalogo-busca').value.trim();
     const categoria = el('catalogo-categoria').value;
+    const ativo = el('catalogo-ativo').value;
     const ordem = el('catalogo-ordem').value;
     if (busca) params.set('search', busca);
     if (categoria) params.set('category', categoria);
+    if (ativo) params.set('is_active', ativo);
     if (ordem) params.set('ordering', ordem);
     return params;
   }
@@ -884,7 +897,12 @@
     }
     const headers = {};
     const simular = el('pagamento-simular-falha');
+    const aviso = el('pagamento-aviso');
     if (simular && simular.checked) headers['X-Simular-Falha'] = 'true';
+    if (aviso) {
+      aviso.hidden = true;
+      aviso.textContent = '';
+    }
 
     mostrarStatus('pagamento-status', 'Registrando pagamento...', 'neutro');
     try {
@@ -894,6 +912,10 @@
         headers: headers
       });
       renderizarPagamento(dados, 'Pagamento registrado (HTTP ' + status + ')');
+      if (simular && simular.checked && aviso) {
+        aviso.textContent = 'Pagamento marcado para falha: a DLQ receberá a mensagem após a escada de reentrega.';
+        aviso.hidden = false;
+      }
       mostrarStatus('pagamento-status', 'Aguardando o worker concluir...', 'neutro');
       acompanharPagamento(pedidoId);
     } catch (erro) {
@@ -1220,6 +1242,10 @@
     el('cache-saida').textContent = 'Não consultado.';
     el('llm-saida').textContent = 'Não consultado.';
     if (el('llm-resumo')) el('llm-resumo').textContent = 'Não consultado.';
+    if (el('pagamento-aviso')) {
+      el('pagamento-aviso').hidden = true;
+      el('pagamento-aviso').textContent = '';
+    }
   }
 
   function configurarEventos() {

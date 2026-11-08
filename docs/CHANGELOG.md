@@ -20,13 +20,14 @@ codifica retroativamente o histórico das aulas anteriores.
 - **`api/core/llm/gemini.py`:** 404 vira `LlmModeloIndisponivel`; bloqueio de segurança vira `RespostaBloqueada`; resposta vazia continua `RespostaInvalida`.
 - **`api/core/llm/servico.py`:** resolução de `auto`, fallback task-specific e `modelos_efetivos` coerente com a chave.
 - **`api/core/views.py`:** novos campos de métricas mantendo `provedor` e `modelo` por compatibilidade.
+- **`api/core/templates/core/app.html` e testes do front-end:** filtro `is_active` no catálogo, `AbortController`/timeout no refresh do JWT e aviso explícito de DLQ no pagamento.
 - **`docs/openapi.yaml`:** versão `1.25.1` e schema `LlmMetrics` com os campos de fallback.
 - **`docs/aulas/25-ia-real-gemini.md`, `README.md`, `docs/apresentacao/roteiro-demo.md`, `docs/apresentacao/checklist-mvp.md`, `AGENTS.md` e `PROMPTS.md`:** documentam `auto`, fallback, modos estritos e diagnóstico.
 
 ### Notas
 - **Latência:** como o fallback ocorre depois de retry/breaker, o exemplo usa `LLM_MAX_TENTATIVAS=2`; com timeout de 30 s e 3 tentativas, a primeira resposta pode demorar.
 - **Validação real:** a chave do `.env` respondeu com `gemini-3.5-flash` (20 tokens de entrada/1 de saída); `auto` respondeu 200 nos três endpoints; um modelo inexistente disparou fallback para o mock com `fallbacks=1`, `provedor_efetivo=mock` e `fallback_ativo=true`.
-- **Gate:** **552 testes**, cobertura **90,21%**, `ruff check .` e `mypy api services dashboard` verdes; nenhum teste automatizado depende de rede ou da chave real.
+- **Gate:** **553 testes**, cobertura **90,21%**, `ruff check .` e `mypy api services dashboard` verdes; nenhum teste automatizado depende de rede ou da chave real.
 
 ## [1.25.0] - 2026-11-08 — Fechamento do MVP, Demo e IA Real (Gemini)
 

@@ -41,6 +41,17 @@ def test_app_responde_html_sem_autenticacao(settings):
 
 
 @pytest.mark.django_db
+def test_app_frontend_tem_filtro_status_timeout_refresh_e_aviso_dlq():
+    html = Client().get("/app/").content.decode("utf-8")
+
+    assert 'id="catalogo-ativo"' in html
+    assert "params.set('is_active'" in html
+    assert 'id="pagamento-aviso"' in html
+    assert "Pagamento marcado para falha" in html
+    assert html.count("AbortController") >= 2
+
+
+@pytest.mark.django_db
 def test_app_redireciona_sem_barra_final():
     resposta = Client().get("/app")
 

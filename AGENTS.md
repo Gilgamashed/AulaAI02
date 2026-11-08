@@ -70,7 +70,7 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 
 ## Validação obrigatória antes de entregar
 
-1. `docker compose run --rm tests` verde (552+ testes, cobertura >= 85%).
+1. `docker compose run --rm tests` verde (553+ testes, cobertura >= 85%).
 2. `ruff check .` sem erros.
 3. `mypy api services dashboard` verde (config em `pyproject.toml`, stubs em
    `requirements-dev.txt`; o CI roda o mesmo comando).
