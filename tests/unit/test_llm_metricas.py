@@ -47,6 +47,44 @@ def test_snapshot_do_coletor_vazio():
     assert dados["taxa_erro"] == 0.0
     assert dados["latencia_media_ms"] == 0.0
     assert dados["custo_usd"] == 0.0
+    assert dados["fallbacks"] == 0
+    assert dados["fallback_sucessos"] == 0
+    assert dados["fallback_falhas"] == 0
+    assert dados["fallback_ativo"] is False
+    assert dados["provedor_efetivo"] == ""
+    assert dados["ultimo_motivo_fallback"] == ""
+
+
+def test_coletor_registra_fallback_e_provedor_efetivo():
+    llm_metrics.record_fallback("LlmTimeout: timeout", provedor="mock")
+    llm_metrics.record_fallback_sucesso(
+        tokens_prompt=10,
+        tokens_output=5,
+        custo_usd=0.001,
+    )
+
+    dados = llm_metrics.snapshot()
+
+    assert dados["fallbacks"] == 1
+    assert dados["fallback_sucessos"] == 1
+    assert dados["fallback_tokens_prompt"] == 10
+    assert dados["fallback_tokens_output"] == 5
+    assert dados["fallback_custo_usd"] == pytest.approx(0.001)
+    assert dados["provedor_efetivo"] == "mock"
+    assert dados["ultimo_motivo_fallback"] == "LlmTimeout: timeout"
+    assert dados["fallback_ativo"] is True
+
+    llm_metrics.marcar_primario_sucesso("gemini")
+    dados = llm_metrics.snapshot()
+    assert dados["provedor_efetivo"] == "gemini"
+    assert dados["fallback_ativo"] is False
+
+
+def test_coletor_registra_falha_do_fallback():
+    llm_metrics.record_fallback("LlmIndisponivel: circuito")
+    llm_metrics.record_fallback_falha()
+
+    assert llm_metrics.snapshot()["fallback_falhas"] == 1
 
 
 def test_coletor_acumula_desfechos_e_totalizadores():

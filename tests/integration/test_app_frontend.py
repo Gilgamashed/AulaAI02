@@ -24,8 +24,16 @@ def test_app_responde_html_sem_autenticacao(settings):
         'id="pagamento"',
         'id="ia"',
         'id="operacao"',
+        'id="llm-resumo"',
     ):
         assert ponto_de_montagem in html
+    for campo_llm in (
+        "provedor_configurado",
+        "provedor_efetivo",
+        "ultimo_motivo_fallback",
+        "fallback_ativo",
+    ):
+        assert campo_llm in html
     assert "chave-secreta-que-nao-pode-vazar" not in html
     assert "GEMINI_API_KEY" not in html
     assert "localStorage" not in html

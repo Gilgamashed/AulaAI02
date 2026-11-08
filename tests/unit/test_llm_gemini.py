@@ -9,7 +9,7 @@ import pytest
 
 from core.llm import erros
 from core.llm.gemini import MODELO_PADRAO, ProvedorGemini
-from core.llm.servico import _montar
+from core.llm.servico import _montar, modelos_efetivos
 
 pytestmark = pytest.mark.unit
 
@@ -149,28 +149,32 @@ def test_resposta_vazia_vira_resposta_invalida():
         )
 
 
-def test_finish_reason_de_seguranca_vira_resposta_invalida():
+def test_finish_reason_de_seguranca_vira_resposta_bloqueada():
     resposta = _RespostaComCandidatos(texto="texto parcial", finish_reason="SAFETY")
     provedor = _provedor(_Modelos(resposta=resposta))
 
-    with pytest.raises(erros.RespostaInvalida, match="SAFETY"):
+    with pytest.raises(erros.RespostaBloqueada, match="SAFETY") as capturado:
         provedor.completar(
             [{"role": "user", "content": "oi"}],
             temperature=0.0,
             max_tokens=16,
         )
 
+    assert capturado.value.motivo == "SAFETY"
 
-def test_prompt_bloqueado_vira_resposta_invalida():
+
+def test_prompt_bloqueado_vira_resposta_bloqueada():
     resposta = _RespostaComCandidatos(block_reason="PROHIBITED_CONTENT")
     provedor = _provedor(_Modelos(resposta=resposta))
 
-    with pytest.raises(erros.RespostaInvalida, match="PROHIBITED_CONTENT"):
+    with pytest.raises(erros.RespostaBloqueada, match="PROHIBITED_CONTENT") as capturado:
         provedor.completar(
             [{"role": "user", "content": "oi"}],
             temperature=0.0,
             max_tokens=16,
         )
+
+    assert capturado.value.motivo == "PROHIBITED_CONTENT"
 
 
 def test_finish_reason_stop_preserva_a_resposta():
@@ -207,6 +211,19 @@ def test_erros_http_sao_traduzidos_para_a_taxonomia(codigo, esperado):
             temperature=0.0,
             max_tokens=16,
         )
+
+
+def test_404_vira_modelo_indisponivel():
+    provedor = _provedor(_Modelos(erro=_ErroHttp(404)))
+
+    with pytest.raises(erros.LlmModeloIndisponivel) as capturado:
+        provedor.completar(
+            [{"role": "user", "content": "oi"}],
+            temperature=0.0,
+            max_tokens=16,
+        )
+
+    assert "LLM_MODEL" in str(capturado.value)
 
 
 def test_rate_limit_preserva_retry_after():
@@ -313,6 +330,7 @@ def test_fabrica_gemini_usa_modelo_padrao_quando_setting_ainda_e_mock(monkeypatc
     assert capturado["modelo"] == MODELO_PADRAO
     assert capturado["api_key"] == "chave"
     assert servico.modelo == MODELO_PADRAO
+    assert servico._fallback_provedor is None
 
 
 def test_fabrica_rejeita_provedor_desconhecido():
@@ -320,3 +338,118 @@ def test_fabrica_rejeita_provedor_desconhecido():
 
     with pytest.raises(erros.LlmConfiguracaoInvalida, match="Valores aceitos"):
         _montar(cfg)
+
+
+def test_fabrica_auto_usa_gemini_e_mock_task_specific(monkeypatch):
+    capturado: dict = {}
+
+    class ProvedorFake:
+        def __init__(self, **kwargs) -> None:
+            capturado.update(kwargs)
+
+        def completar(self, *args, **kwargs):  # pragma: no cover - não chamado
+            raise AssertionError
+
+    monkeypatch.setattr("core.llm.servico.ProvedorGemini", ProvedorFake)
+    cfg = SimpleNamespace(
+        LLM_PROVIDER="auto",
+        GEMINI_API_KEY="chave",
+        LLM_MODEL="mock",
+        LLM_MODEL_SQL="mock-sql",
+        LLM_MODEL_DOCS="mock-docs",
+        LLM_TIMEOUT_SEGUNDOS=30.0,
+    )
+
+    esperados = {
+        "assist": "ProvedorMock",
+        "sql": "ProvedorMockSql",
+        "docs": "ProvedorMockDocs",
+    }
+    for tarefa, esperado in esperados.items():
+        servico = _montar(cfg, tarefa)
+        assert type(servico._provedor).__name__ == "ProvedorFake"
+        assert type(servico._fallback_provedor).__name__ == esperado
+
+    assert capturado["modelo"] == MODELO_PADRAO
+
+
+def test_fabrica_auto_sem_chave_usa_mock_sem_fallback():
+    cfg = SimpleNamespace(
+        LLM_PROVIDER="auto",
+        GEMINI_API_KEY="",
+        LLM_MODEL="mock",
+        LLM_MODEL_SQL="mock-sql",
+        LLM_MODEL_DOCS="mock-docs",
+    )
+
+    servico = _montar(cfg, "sql")
+
+    assert type(servico._provedor).__name__ == "ProvedorMockSql"
+    assert servico._fallback_provedor is None
+    assert servico.modelo == "mock-sql"
+
+
+def test_fabrica_auto_sem_chave_loga_warning(monkeypatch):
+    chamadas: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        "core.llm.servico.logger.warning",
+        lambda mensagem, **kwargs: chamadas.append((mensagem, kwargs)),
+    )
+    cfg = SimpleNamespace(
+        LLM_PROVIDER="auto",
+        GEMINI_API_KEY="",
+        LLM_MODEL="mock",
+    )
+
+    _montar(cfg, "assist")
+
+    assert chamadas
+    assert "GEMINI_API_KEY ausente" in chamadas[0][0]
+    assert chamadas[0][1]["extra"]["motivo"] == "GEMINI_API_KEY ausente/vazia"
+
+
+def test_fabrica_auto_com_falha_de_montagem_usa_mock(monkeypatch):
+    class ProvedorQuebrado:
+        def __init__(self, **kwargs) -> None:
+            raise erros.LlmConfiguracaoInvalida("dependência ausente")
+
+    monkeypatch.setattr("core.llm.servico.ProvedorGemini", ProvedorQuebrado)
+    cfg = SimpleNamespace(
+        LLM_PROVIDER="auto",
+        GEMINI_API_KEY="chave",
+        LLM_MODEL="gemini-3.5-flash",
+    )
+
+    servico = _montar(cfg, "assist")
+
+    assert type(servico._provedor).__name__ == "ProvedorMock"
+    assert servico._fallback_provedor is None
+    assert servico.modelo == "mock"
+
+
+def test_modelos_efetivos_resolve_auto_com_e_sem_chave():
+    com_chave = SimpleNamespace(
+        LLM_PROVIDER="auto",
+        GEMINI_API_KEY="chave",
+        LLM_MODEL="mock",
+        LLM_MODEL_SQL="mock-sql",
+        LLM_MODEL_DOCS="mock-docs",
+    )
+    sem_chave = SimpleNamespace(
+        LLM_PROVIDER="auto",
+        GEMINI_API_KEY="",
+        LLM_MODEL="mock",
+        LLM_MODEL_SQL="mock-sql",
+        LLM_MODEL_DOCS="mock-docs",
+    )
+
+    assert modelos_efetivos(com_chave) == {
+        "assist": MODELO_PADRAO,
+        "sql": MODELO_PADRAO,
+        "docs": MODELO_PADRAO,
+    }
+    assert modelos_efetivos(sem_chave) == {
+        "assist": "mock",
+        "sql": "mock-sql",
+        "docs": "mock-docs",
+    }

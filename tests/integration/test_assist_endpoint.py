@@ -172,12 +172,18 @@ def test_metrics_admin_recebe_o_snapshot(client_admin):
     assert resposta.status_code == 200
     corpo = resposta.data
     assert corpo["provedor"] == "mock"
+    assert corpo["provedor_configurado"] == "mock"
+    assert corpo["provedor_efetivo"] == "mock"
     assert corpo["modelo"] == "mock"
+    assert corpo["fallbacks"] == 0
+    assert corpo["ultimo_motivo_fallback"] == ""
+    assert corpo["fallback_ativo"] is False
     assert "timeout_segundos" in corpo
     assert set(corpo["custo_por_1m_tokens"]) == {"input_usd", "output_usd"}
     assert "chamadas" in corpo["total"]
     assert "taxa_erro" in corpo["total"]
     assert "latencia_media_ms" in corpo["total"]
+    assert corpo["total"]["fallbacks"] == 0
 
 
 def test_modos_do_assist_pedem_resposta_em_portugues():
@@ -194,12 +200,65 @@ def test_metrics_reflete_o_modelo_efetivo_do_gemini(client_admin, settings):
 
     assert resposta.status_code == 200
     assert resposta.data["provedor"] == "gemini"
+    assert resposta.data["provedor_configurado"] == "gemini"
+    assert resposta.data["provedor_efetivo"] == "gemini"
     assert resposta.data["modelo"] == "gemini-3.5-flash"
     assert resposta.data["modelos"] == {
         "assist": "gemini-3.5-flash",
         "sql": "gemini-3.5-flash",
         "docs": "gemini-3.5-flash",
     }
+
+
+def test_metrics_auto_resolve_gemini_quando_ha_chave(client_admin, settings):
+    settings.LLM_PROVIDER = "auto"
+    settings.GEMINI_API_KEY = "chave"
+    settings.LLM_MODEL = "mock"
+    settings.LLM_MODEL_SQL = "mock-sql"
+    settings.LLM_MODEL_DOCS = "mock-docs"
+
+    resposta = client_admin.get("/api/v1/llm/metrics/")
+
+    assert resposta.status_code == 200
+    assert resposta.data["provedor_configurado"] == "auto"
+    assert resposta.data["provedor_efetivo"] == "gemini"
+    assert resposta.data["modelos"]["assist"] == "gemini-3.5-flash"
+
+
+def test_metrics_auto_sem_chave_resolve_mock(client_admin, settings):
+    settings.LLM_PROVIDER = "auto"
+    settings.GEMINI_API_KEY = ""
+    settings.LLM_MODEL = "mock"
+    settings.LLM_MODEL_SQL = "mock-sql"
+    settings.LLM_MODEL_DOCS = "mock-docs"
+
+    resposta = client_admin.get("/api/v1/llm/metrics/")
+
+    assert resposta.status_code == 200
+    assert resposta.data["provedor_configurado"] == "auto"
+    assert resposta.data["provedor_efetivo"] == "mock"
+    assert resposta.data["modelos"] == {
+        "assist": "mock",
+        "sql": "mock-sql",
+        "docs": "mock-docs",
+    }
+
+
+def test_metrics_expoe_contadores_de_fallback(client_admin):
+    llm_metrics.record_fallback("LlmTimeout: timeout", provedor="mock")
+    llm_metrics.record_fallback_sucesso(
+        tokens_prompt=10, tokens_output=5, custo_usd=0.001
+    )
+
+    resposta = client_admin.get("/api/v1/llm/metrics/")
+
+    assert resposta.status_code == 200
+    assert resposta.data["fallbacks"] == 1
+    assert resposta.data["ultimo_motivo_fallback"] == "LlmTimeout: timeout"
+    assert resposta.data["fallback_ativo"] is True
+    assert resposta.data["provedor_efetivo"] == "mock"
+    assert resposta.data["total"]["fallback_sucessos"] == 1
+    assert resposta.data["total"]["fallback_tokens_prompt"] == 10
 
 
 def test_metrics_sem_token_e_barrado(api_client):
