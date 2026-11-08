@@ -121,6 +121,10 @@ permissão em vez de chamar a API.
 
 - Exibir `GET /health` (broker e fluxos), `GET /api/v1/cache/metrics/` e
   `GET /api/v1/llm/metrics/` (admin) em cartões simples.
+- No cartão de IA, exibir `provedor_configurado` (`auto|gemini|mock`),
+  `provedor_efetivo`, o modelo da tarefa `assist` e o indicador de fallback
+  (`fallbacks`/`ultimo_motivo_fallback`). A UI não escolhe o provedor; apenas
+  reflete o estado do backend.
 - Exibir links para:
   - Streamlit principal: `http://<host>:8501`;
   - Swagger: `/docs/`;
@@ -162,6 +166,7 @@ desenvolvimento (`DEBUG=True`).
   - `GET /app/` responde 200 e `text/html`;
   - o HTML contém os pontos de montagem das seções principais (catálogo,
     pedido, pagamento, IA, operação);
+  - o HTML contém os campos de provedor configurado/efetivo e fallback;
   - o template não expõe segredo nem token;
   - a rota não exige autenticação.
 - Testes existentes de URL/health continuam verdes.
@@ -177,7 +182,8 @@ desenvolvimento (`DEBUG=True`).
       idempotência.
 - [ ] É possível pagar, acompanhar o worker e ver a notificação na UI.
 - [ ] As três abas de IA exibem resposta, SQL/tabela e fontes/guardrail.
-- [ ] Cartões de saúde, cache e métricas de IA são exibidos.
+- [ ] Cartões de saúde, cache e métricas de IA são exibidos, incluindo
+      provedor configurado, provedor efetivo e indicador de fallback.
 - [ ] Nenhum dado da API é injetado via `innerHTML`.
 - [ ] Nenhum segredo ou token é logado/exibido.
 - [ ] A página é servida same-origin, sem CORS e sem novo serviço.

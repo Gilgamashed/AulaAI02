@@ -85,39 +85,36 @@ docker compose logs -f worker-pagamentos
 Reenviar o mesmo POST de pagamento é idempotente (200); outro método/desfecho
 no mesmo pedido retorna 409.
 
-### 4. IA no modo mock (2 min)
-
-1. Aba **Suporte**: cole um log curto e execute.
-2. Aba **Texto-para-SQL**: use um exemplo clicável e mostre SQL, colunas e
-   linhas.
-3. Aba **Documentação**: pergunte “Como rodar os testes?” e mostre
-   `sources` com caminho, intervalo e score.
-
-**Plano B:** o mock é o padrão de CI e não depende de rede; se algo falhar,
-confirme `LLM_PROVIDER=mock` e reinicie a API.
-
-### 5. IA real com Gemini (3 min, opcional)
+### 4. IA com Gemini e fallback (3 min)
 
 1. Confirme no `.env`:
 
    ```env
-   LLM_PROVIDER=gemini
+   LLM_PROVIDER=auto
    GEMINI_API_KEY=...
    LLM_MODEL=gemini-3.5-flash
    LLM_MODEL_SQL=gemini-3.5-flash
    LLM_MODEL_DOCS=gemini-3.5-flash
    LLM_TIMEOUT_SEGUNDOS=30.0
+   LLM_MAX_TENTATIVAS=2
    ```
 
 2. Reinicie a API: `docker compose up -d api`.
-3. Repita uma pergunta em cada aba e mostre `/api/v1/llm/metrics/` com
-   provedor, modelo, tokens e custo estimado.
+3. Aba **Suporte**: cole um log curto e execute.
+4. Aba **Texto-para-SQL**: use um exemplo clicável e mostre SQL, colunas e
+   linhas.
+5. Aba **Documentação**: pergunte “Como rodar os testes?” e mostre
+   `sources` com caminho, intervalo e score.
+6. Abra `/api/v1/llm/metrics/` e mostre `provedor_configurado=auto`,
+   `provedor_efetivo=gemini`, `modelos`, `fallbacks` e
+   `ultimo_motivo_fallback`.
 
-**Plano B:** se houver erro 401/403 (chave), 429 (cota) ou timeout, volte para
-`LLM_PROVIDER=mock` no `.env`, reinicie a API e siga a demo. Não existe
-fallback automático — a troca é explícita.
+**Plano B:** o fallback é automático em `auto`. Se o Gemini estiver fora ou a
+cota estourar, o mock da tarefa assume após esgotar retry/breaker. Para forçar
+o modo determinístico, use `LLM_PROVIDER=mock`; para diagnóstico estrito, use
+`LLM_PROVIDER=gemini`. Reinicie a API após a troca.
 
-### 6. Dashboards (3 min)
+### 5. Dashboards (3 min)
 
 1. Abra `http://localhost:8501`.
 2. Mostre receita total, ticket médio, receita por dia e os dois rankings de
@@ -128,7 +125,7 @@ fallback automático — a troca é explícita.
 `http://localhost:8501/_stcore/health` e os logs do container `dashboard`; as
 mesmas consultas podem ser demonstradas via Swagger/`/docs/`.
 
-### 7. CI/CD (2 min)
+### 6. CI/CD (2 min)
 
 1. Abra a aba **Actions** do repositório e mostre o último run verde.
 2. Destaque os jobs `test-and-lint`, `docker-build`, `compose-smoke` e
@@ -145,6 +142,6 @@ python scripts/validar_compose.py
 ## Encerramento
 
 - Retome o [checklist do MVP](checklist-mvp.md) e os dez requisitos.
-- Reforce as limitações: mock padrão, RAG lexical, métricas por processo,
-  front-end de demonstração e deploy simulado.
+- Reforce as limitações: fallback com latência, RAG lexical, métricas por
+  processo, front-end de demonstração e deploy simulado.
 - Deixe o smoke reproduzível: `python scripts/validar_mvp.py`.

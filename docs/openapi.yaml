@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: SynapseShop API
-  version: 1.25.0
+  version: 1.25.1
   description: |
-    Documentação OpenAPI do MVP SynapseShop (Aula 24).
+    Documentação OpenAPI do MVP SynapseShop (Aula 25).
 
     Contrato da API principal (`api/` — Django REST Framework) e do
     microsserviço complementar de estoque (`services/inventory/` — FastAPI).
@@ -1222,13 +1222,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/LlmMetrics"
               example:
-                provedor: mock
-                modelo: mock
+                provedor: auto
+                provedor_configurado: auto
+                provedor_efetivo: gemini
+                modelo: gemini-3.5-flash
                 modelos:
-                  assist: mock
-                  sql: mock-sql
-                  docs: mock-docs
-                timeout_segundos: 5.0
+                  assist: gemini-3.5-flash
+                  sql: gemini-3.5-flash
+                  docs: gemini-3.5-flash
+                fallbacks: 0
+                ultimo_motivo_fallback: ""
+                fallback_ativo: false
+                timeout_segundos: 30.0
                 redacao_ativa: true
                 custo_por_1m_tokens:
                   input_usd: 0.30
@@ -2455,7 +2460,16 @@ components:
       properties:
         provedor:
           type: string
-          description: Provedor configurado (`mock` ou `gemini`).
+          enum: [auto, gemini, mock]
+          description: Alias de `provedor_configurado` (compatibilidade).
+        provedor_configurado:
+          type: string
+          enum: [auto, gemini, mock]
+          description: Modo configurado em `LLM_PROVIDER`.
+        provedor_efetivo:
+          type: string
+          enum: [gemini, mock]
+          description: Provedor que atendeu a última chamada (ou o primário, antes da primeira).
         modelo:
           type: string
           description: Modelo efetivo da tarefa `assist` (já resolve defaults do provedor).
@@ -2470,6 +2484,15 @@ components:
             docs:
               type: string
           required: [assist, sql, docs]
+        fallbacks:
+          type: integer
+          description: Quantidade de chamadas atendidas pelo fallback mock.
+        ultimo_motivo_fallback:
+          type: string
+          description: Motivo sanitizado do último fallback (vazio se não houve).
+        fallback_ativo:
+          type: boolean
+          description: Se a última chamada usou o fallback mock.
         timeout_segundos:
           type: number
           description: Espera máxima por chamada (guarda genérica).
@@ -2500,6 +2523,27 @@ components:
               type: integer
             terminais:
               type: integer
+            fallbacks:
+              type: integer
+              description: Chamadas que caíram para o mock.
+            fallback_sucessos:
+              type: integer
+              description: Fallbacks que responderam com sucesso.
+            fallback_falhas:
+              type: integer
+              description: Fallbacks que também falharam (resposta 503).
+            fallback_tokens_prompt:
+              type: integer
+            fallback_tokens_output:
+              type: integer
+            fallback_custo_usd:
+              type: number
+            provedor_efetivo:
+              type: string
+            ultimo_motivo_fallback:
+              type: string
+            fallback_ativo:
+              type: boolean
             tokens_prompt:
               type: integer
             tokens_output:

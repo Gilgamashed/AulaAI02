@@ -61,8 +61,9 @@ A matriz deve cobrir exatamente os dez itens do arquivo de preparativos:
 
 O checklist deve registrar como limitações, no mínimo:
 
-- os provedores de IA são mock por padrão e podem ser trocados por Gemini
-  (spec `spec_da_aula_25_gemini.md`);
+- o provedor de IA preferencial é o Gemini e `LLM_PROVIDER=auto` é o padrão;
+  o mock assume automaticamente apenas quando o Gemini está tecnicamente
+  indisponível (não em bloqueio de segurança ou requisição inválida);
 - os embeddings do RAG são lexicais (TF-IDF), sem modelo neural;
 - o dashboard de desempenho mede o processo da API, não profundidade de
   fila do broker;
@@ -165,10 +166,10 @@ Criar `docs/apresentacao/roteiro-demo.md` com:
 - pré-requisitos e comandos de subida;
 - credenciais demo;
 - ordem sugerida da demo (catálogo/cache → pedido → pagamento/notificação →
-  IA mock → IA Gemini → dashboards → CI/CD);
+  IA com Gemini e fallback mock → dashboards → CI/CD);
 - tempo estimado por bloco;
-- plano B para cada bloco (por exemplo, `LLM_PROVIDER=mock` se o Gemini
-  falhar);
+- plano B para cada bloco (por exemplo, forçar `LLM_PROVIDER=mock` se o
+  fallback automático não for suficiente);
 - comandos de diagnóstico (`docker compose ps`, logs dos workers,
   `inspecionar_dlq_kafka`, `validar_mvp.py`).
 
@@ -200,6 +201,8 @@ Criar `docs/apresentacao/roteiro-demo.md` com:
       e produtos mais vendidos.
 - [ ] `docs/apresentacao/roteiro-demo.md` permite conduzir a apresentação sem
       consultar o código.
+- [ ] O checklist e o roteiro documentam `LLM_PROVIDER=auto`, o fallback
+      apenas para indisponibilidade técnica e como forçar `mock`/`gemini`.
 - [ ] Testes novos e existentes verdes; `ruff check .` e `mypy api services`
       sem novos erros.
 - [ ] `README.md`, `docs/CHANGELOG.md` e `PROMPTS.md` atualizados.

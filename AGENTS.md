@@ -56,9 +56,10 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 - Python 3.12+ (Docker) / 3.14 (venv local); estilo Ruff; tipos via mypy.
 - Sem comentários supérfluos; sem placeholders ansiosos; sem dead code.
 - Segredos **somente** via `.env` (gitignored; `.env.example` documenta).
-- IA: `LLM_PROVIDER=mock` é o padrão de testes/CI e o plano B;
-  `LLM_PROVIDER=gemini` ativa o provedor real com `GEMINI_API_KEY` (nunca
-  versione nem imprima a chave).
+- IA: `LLM_PROVIDER=auto` é o padrão — Gemini preferencial e mock como
+  fallback apenas para indisponibilidade técnica; `gemini` é estrito e `mock`
+  é determinístico. Testes/CI fixam `LLM_PROVIDER=mock`; a `GEMINI_API_KEY`
+  fica só no `.env` (nunca versione nem imprima a chave).
 - CI/CD: a publicação no DockerHub usa os *repository secrets*
   `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`; nunca versione os valores.
 - Toda decisão relevante fica registrada: specs, `README.md`,
@@ -69,7 +70,7 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 
 ## Validação obrigatória antes de entregar
 
-1. `docker compose run --rm tests` verde (532+ testes, cobertura >= 85%).
+1. `docker compose run --rm tests` verde (552+ testes, cobertura >= 85%).
 2. `ruff check .` sem erros.
 3. `mypy api services dashboard` verde (config em `pyproject.toml`, stubs em
    `requirements-dev.txt`; o CI roda o mesmo comando).

@@ -21,10 +21,10 @@ Status possíveis: **ATENDIDO**, **PARCIAL** ou **PENDENTE**.
 
 ## Limitações conhecidas
 
-- **Provedores de IA:** o padrão continua sendo o mock determinístico, sem
-  rede e sem custo. O Gemini real é opcional (`LLM_PROVIDER=gemini`, spec
-  `spec_da_aula_25_gemini.md`) e não há fallback automático: a troca é
-  explícita para que uma falha de configuração não fique silenciosa.
+- **Provedores de IA:** o padrão é `LLM_PROVIDER=auto`: Gemini preferencial e
+  mock como fallback apenas para indisponibilidade técnica, depois de esgotar
+  retry/breaker. `gemini` é estrito e `mock` é determinístico; o mock continua
+  sendo o padrão de testes/CI (spec `spec_da_aula_25_gemini.md`).
 - **RAG lexical:** os embeddings são TF-IDF locais, sem modelo neural.
   Sinônimos que não compartilham tokens podem não ser recuperados; o guardrail
   responde `sources: []` nesses casos. Um modelo de embeddings Gemini é

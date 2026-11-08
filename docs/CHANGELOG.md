@@ -5,6 +5,29 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.25.1] - 2026-11-08 — Fallback automático Gemini → mock
+
+### Adicionado
+- **`LLM_PROVIDER=auto` como padrão:** Gemini é o provedor preferencial; o mock especializado da tarefa assume apenas em indisponibilidade técnica. `gemini` continua estrito (sem fallback) e `mock` continua determinístico.
+- **Fallback no `LlmService`:** erros recuperáveis (timeout, conexão/DNS, 429, 5xx) caem para o mock depois de esgotar retry/breaker; erros terminais de disponibilidade (401/403/404) caem após a primeira falha. Erro 400 e bloqueio de segurança **não** fazem fallback.
+- **Novas exceções:** `LlmModeloIndisponivel` (HTTP 404) e `RespostaBloqueada` (bloqueio de segurança com motivo), permitindo separar disponibilidade de conteúdo bloqueado.
+- **Métricas de fallback:** `fallbacks`, `fallback_sucessos`, `fallback_falhas`, `fallback_tokens_*`, `fallback_custo_usd`, `provedor_configurado`, `provedor_efetivo`, `ultimo_motivo_fallback` e `fallback_ativo` em `/api/v1/llm/metrics/`.
+- **Front-end:** o cartão de IA mostra provedor configurado, provedor efetivo, modelo e estado do fallback, além do JSON detalhado.
+- **Testes:** `tests/unit/test_llm_fallback.py` cobre fallback por tarefa, 400/bloqueio sem fallback, circuito aberto, credencial/modelo inválidos e falha do próprio fallback; `test_llm_gemini.py`, `test_llm_metricas.py`, `test_assist_endpoint.py` e `test_app_frontend.py` foram ampliados.
+
+### Alterado
+- **`api/config/settings.py`, `.env.example` e `docker-compose.yml`:** default `auto`, timeout de 30 s no exemplo real e `LLM_MAX_TENTATIVAS=2` para reduzir a espera antes do fallback; o serviço `tests` continua fixando `mock`.
+- **`api/core/llm/gemini.py`:** 404 vira `LlmModeloIndisponivel`; bloqueio de segurança vira `RespostaBloqueada`; resposta vazia continua `RespostaInvalida`.
+- **`api/core/llm/servico.py`:** resolução de `auto`, fallback task-specific e `modelos_efetivos` coerente com a chave.
+- **`api/core/views.py`:** novos campos de métricas mantendo `provedor` e `modelo` por compatibilidade.
+- **`docs/openapi.yaml`:** versão `1.25.1` e schema `LlmMetrics` com os campos de fallback.
+- **`docs/aulas/25-ia-real-gemini.md`, `README.md`, `docs/apresentacao/roteiro-demo.md`, `docs/apresentacao/checklist-mvp.md`, `AGENTS.md` e `PROMPTS.md`:** documentam `auto`, fallback, modos estritos e diagnóstico.
+
+### Notas
+- **Latência:** como o fallback ocorre depois de retry/breaker, o exemplo usa `LLM_MAX_TENTATIVAS=2`; com timeout de 30 s e 3 tentativas, a primeira resposta pode demorar.
+- **Validação real:** a chave do `.env` respondeu com `gemini-3.5-flash` (20 tokens de entrada/1 de saída); `auto` respondeu 200 nos três endpoints; um modelo inexistente disparou fallback para o mock com `fallbacks=1`, `provedor_efetivo=mock` e `fallback_ativo=true`.
+- **Gate:** **552 testes**, cobertura **90,21%**, `ruff check .` e `mypy api services dashboard` verdes; nenhum teste automatizado depende de rede ou da chave real.
+
 ## [1.25.0] - 2026-11-08 — Fechamento do MVP, Demo e IA Real (Gemini)
 
 ### Adicionado

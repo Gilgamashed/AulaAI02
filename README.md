@@ -462,10 +462,10 @@ provedor · **503** provedor/banco indisponível.
 
 ### Limitações registradas
 
-- O provedor desta aula é o **mock determinístico** `ProvedorMockSql` (mesma
-  porta `ProvedorLlm` da Aula 14), sem rede e sem credenciais. Ele cobre os
-  padrões de negócio documentados; não é linguagem natural irrestrita. Um
-  adaptador de LLM real entra pela mesma porta sem mudar validação/execução.
+- O **mock determinístico** `ProvedorMockSql` (mesma porta `ProvedorLlm` da
+  Aula 14) continua disponível e é o fallback de `auto`. Com `auto`/`gemini`,
+  o Gemini real pode atender; o mock cobre os padrões de negócio documentados
+  e não é linguagem natural irrestrita.
 - `enderecos_entrega` **não existe** neste domínio; perguntas sobre endereço
   retornam 422 em vez de inventar tabela/colunas.
 - A transação read-only e o `statement_timeout` protegem contra mutação e
@@ -774,10 +774,10 @@ provedor · **503** índice ausente/indisponível ou provedor fora do ar.
 
 ### Limitações registradas
 
-- O provedor desta aula é o **mock determinístico** `ProvedorMockDocs`
-  (mesma porta `ProvedorLlm` da Aula 14): ele extrai a passagem mais
-  relacionada do contexto e a cita. Não é síntese neural; um adaptador real
-  entra pela mesma porta sem mudar índice, recuperação ou contrato.
+- O **mock determinístico** `ProvedorMockDocs` (mesma porta `ProvedorLlm` da
+  Aula 14) extrai a passagem mais relacionada do contexto e a cita; ele é o
+  fallback de `auto`. Com Gemini real, a síntese é neural, mas o índice, a
+  recuperação, o guardrail e o contrato continuam iguais.
 - A semântica do embedding é **lexical**. Sinônimos que não compartilham
   radicais/tokens podem não se aproximar; perguntas fora do vocabulário
   pontuam zero e caem no guardrail. Um modelo neural de embeddings é a
@@ -824,22 +824,32 @@ sem CORS, sem build e sem container novo. A página permite:
 
 ### Provedor Gemini
 
-O mock continua sendo o padrão de testes/CI e o plano B da apresentação. Para
-usar o Gemini real, configure o `.env` (nunca versione a chave):
+O padrão é `LLM_PROVIDER=auto`: o Gemini é tentado primeiro e, se estiver
+tecnicamente indisponível, o mock especializado da tarefa assume. O mock
+continua sendo o padrão explícito de testes/CI e pode ser forçado com
+`LLM_PROVIDER=mock`. Para usar o Gemini real, configure o `.env` (nunca
+versione a chave):
 
 ```env
-LLM_PROVIDER=gemini
+LLM_PROVIDER=auto
 GEMINI_API_KEY=sua-chave-do-google-ai-studio
 LLM_MODEL=gemini-3.5-flash
 LLM_MODEL_SQL=gemini-3.5-flash
 LLM_MODEL_DOCS=gemini-3.5-flash
 LLM_TIMEOUT_SEGUNDOS=30.0
+LLM_MAX_TENTATIVAS=2
 ```
 
+Modos: `auto` (Gemini + fallback mock), `gemini` (estrito, sem fallback) e
+`mock` (determinístico). O fallback cobre apenas indisponibilidade técnica —
+timeout, conexão, 429, 5xx, circuito aberto, chave/modelo inválidos e resposta
+vazia. Erro 400 e bloqueio de segurança são terminais e não caem para o mock.
+
 A resiliência (timeout, retry e circuit breaker), a redação de PII, a validação
-de SQL e o guardrail do RAG continuam os mesmos. Se o provedor falhar durante a
-demo, volte para `LLM_PROVIDER=mock` e reinicie a API — não há fallback
-silencioso por decisão de projeto.
+de SQL e o guardrail do RAG continuam os mesmos. O
+`/api/v1/llm/metrics/` mostra `provedor_configurado`, `provedor_efetivo`,
+`modelos`, `fallbacks`, `ultimo_motivo_fallback` e `fallback_ativo`. Para forçar
+o modo determinístico na demo, use `LLM_PROVIDER=mock` e reinicie a API.
 
 ### Massa demo e smoke
 
