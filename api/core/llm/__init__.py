@@ -36,12 +36,14 @@ from .erros import (
     RespostaInvalida,
     descrever,
 )
+from .gemini import ProvedorGemini
 from .mock import ProvedorMock
 from .mock_docs import ProvedorMockDocs
 from .mock_sql import ProvedorMockSql
 from .portas import LlmResposta, ProvedorLlm
 from .retry import RetryPolicy
 from .servico import (
+    PROVIDER_GEMINI,
     PROVIDER_MOCK,
     TAREFA_ASSIST,
     TAREFA_DOCS,
@@ -66,7 +68,9 @@ __all__ = [
     "LlmService",
     "LlmTerminal",
     "LlmTimeout",
+    "PROVIDER_GEMINI",
     "PROVIDER_MOCK",
+    "ProvedorGemini",
     "ProvedorLlm",
     "ProvedorMock",
     "ProvedorMockDocs",

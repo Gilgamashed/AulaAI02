@@ -180,6 +180,28 @@ def test_metrics_admin_recebe_o_snapshot(client_admin):
     assert "latencia_media_ms" in corpo["total"]
 
 
+def test_modos_do_assist_pedem_resposta_em_portugues():
+    assert all("português" in texto.lower() for texto in core_views.MODO_ASSIST.values())
+
+
+def test_metrics_reflete_o_modelo_efetivo_do_gemini(client_admin, settings):
+    settings.LLM_PROVIDER = "gemini"
+    settings.LLM_MODEL = "mock"
+    settings.LLM_MODEL_SQL = "mock-sql"
+    settings.LLM_MODEL_DOCS = "mock-docs"
+
+    resposta = client_admin.get("/api/v1/llm/metrics/")
+
+    assert resposta.status_code == 200
+    assert resposta.data["provedor"] == "gemini"
+    assert resposta.data["modelo"] == "gemini-3.5-flash"
+    assert resposta.data["modelos"] == {
+        "assist": "gemini-3.5-flash",
+        "sql": "gemini-3.5-flash",
+        "docs": "gemini-3.5-flash",
+    }
+
+
 def test_metrics_sem_token_e_barrado(api_client):
     resposta = api_client.get("/api/v1/llm/metrics/")
 

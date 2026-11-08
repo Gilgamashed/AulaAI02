@@ -521,17 +521,16 @@ PAGAMENTO_PERMITIR_SIMULACAO_FALHA = _env_flag(
 # Aula 14 — Camada de IA: llm_service
 # =====================================================================
 # O item 1 da spec constrói a resiliência da comunicação com o provedor de IA:
-# timeout (<=5s), retry com backoff exponencial + jitter (3 tentativas) e
-# circuit breaker (closed/open/half-open). O provedor de HOJE é um **mock** em
-# memória (LLM_PROVIDER=mock): o sistema não depende de nenhuma API externa nem
-# de credenciais e fica pronto para receber o provedor real no futuro — entra um
-# adaptador que cumpre `core.llm.portas.ProvedorLlm` e a fábrica passa a
-# selecioná-lo por esta mesma variável, sem mudar a resiliência.
+# timeout, retry com backoff exponencial + jitter (3 tentativas) e circuit
+# breaker (closed/open/half-open). A Aula 25 adiciona o provedor real Gemini
+# (`LLM_PROVIDER=gemini`); o mock continua sendo o padrão de testes/CI e o
+# plano B da apresentação.
 #
-#   LLM_PROVIDER             -> provedor selecionado ('mock' é o único hoje).
-#   LLM_MODEL                -> modelo endereçado (informacional enquanto o
-#                               provedor é o mock; usado no log e, no futuro, no
-#                               corpo do completamento).
+#   LLM_PROVIDER             -> 'mock' (padrão) ou 'gemini'.
+#   GEMINI_API_KEY           -> chave do provedor real; nunca versionada.
+#   LLM_MODEL                -> modelo endereçado (assist).
+#   LLM_MODEL_SQL            -> modelo da tarefa de texto-para-SQL.
+#   LLM_MODEL_DOCS           -> modelo do assistente RAG.
 #   LLM_TIMEOUT_SEGUNDOS     -> deadline da guarda genérica do LlmService
 #                               (limiar da spec: <=5s).
 #   LLM_MAX_TENTATIVAS       -> execuções da chamada (spec: 3).
@@ -546,9 +545,10 @@ PAGAMENTO_PERMITIR_SIMULACAO_FALHA = _env_flag(
 #   LLM_CUSTO_INPUT_POR_1M_TOKENS / LLM_CUSTO_OUTPUT_POR_1M_TOKENS -> preço em
 #                               USD por 1 milhão de tokens (input/output) para a
 #                               ESTIMATIVA de custo por chamada. Os defaults são
-#                               números de exemplo (o mock não cobra); ajuste
-#                               para o provedor real quando o adaptador chegar.
+#                               números de exemplo para o Gemini Flash; ajuste
+#                               conforme a tabela vigente do provedor.
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "mock").strip().lower()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 LLM_MODEL = os.environ.get("LLM_MODEL", "mock")
 # Aula 21: o texto-para-SQL usa um provedor mock especializado (mesma porta
 # `ProvedorLlm`); o nome aparece em `meta.modelo` para deixar claro que o SQL
@@ -566,10 +566,10 @@ LLM_CB_MAX_TENTATIVAS_HALF_OPEN = int(
 )
 LLM_REDACAO_ATIVA = _env_flag("LLM_REDACAO_ATIVA", "True")
 LLM_CUSTO_INPUT_POR_1M_TOKENS = float(
-    os.environ.get("LLM_CUSTO_INPUT_POR_1M_TOKENS", "5.00")
+    os.environ.get("LLM_CUSTO_INPUT_POR_1M_TOKENS", "0.30")
 )
 LLM_CUSTO_OUTPUT_POR_1M_TOKENS = float(
-    os.environ.get("LLM_CUSTO_OUTPUT_POR_1M_TOKENS", "15.00")
+    os.environ.get("LLM_CUSTO_OUTPUT_POR_1M_TOKENS", "2.50")
 )
 
 # =====================================================================

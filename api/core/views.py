@@ -26,6 +26,7 @@ from .llm import (
     criar_llm_service,
 )
 from .llm.metricas import llm_metrics
+from .llm.servico import modelos_efetivos
 from .messaging import broker as mensageria
 from .models import Category, Item, Notificacao, Pagamento, Pedido
 from .permissions import IsAdminRole
@@ -924,12 +925,14 @@ class CacheMetricsView(APIView):
 # eco); o template é o mesmo que o provedor real receberá.
 MODO_ASSIST = {
     "summarize": (
-        "Você é um assistente de operações. Resuma os logs a seguir de forma "
-        "objetiva, destacando erros, anomalias e o que exige atenção."
+        "Você é um assistente de operações. Responda em português do Brasil, "
+        "de forma objetiva. Resuma os logs a seguir, destacando erros, "
+        "anomalias e o que exige atenção."
     ),
     "explain": (
-        "Você é um assistente de operações. Explique o que os logs a seguir "
-        "indicam, incluindo a causa provável e o próximo passo recomendado."
+        "Você é um assistente de operações. Responda em português do Brasil, "
+        "de forma objetiva. Explique o que os logs a seguir indicam, incluindo "
+        "a causa provável e o próximo passo recomendado."
     ),
 }
 
@@ -1045,10 +1048,12 @@ class LlmMetricsView(APIView):
     permission_classes = [IsAdminRole]
 
     def get(self, request) -> Response:
+        modelos = modelos_efetivos(settings)
         return Response(
             {
                 "provedor": getattr(settings, "LLM_PROVIDER", "mock"),
-                "modelo": getattr(settings, "LLM_MODEL", "mock"),
+                "modelo": modelos["assist"],
+                "modelos": modelos,
                 "timeout_segundos": getattr(settings, "LLM_TIMEOUT_SEGUNDOS", 5.0),
                 "redacao_ativa": getattr(settings, "LLM_REDACAO_ATIVA", True),
                 "custo_por_1m_tokens": {

@@ -29,3 +29,7 @@ pika>=1.3,<2.0
 # garantias da série 2.x; wheels existentes para cp312 (Dockerfile) e cp314
 # (venv local), então a instalação não cai no build do librdkafka.
 confluent-kafka>=2.15,<3.0
+# Aula 25: SDK oficial do Google Gemini para o provedor real de IA.
+# O mock continua sendo o padrão (`LLM_PROVIDER=mock`); a dependência só é
+# exercitada quando `LLM_PROVIDER=gemini` e `GEMINI_API_KEY` estão definidos.
+google-genai>=1.0,<2.0

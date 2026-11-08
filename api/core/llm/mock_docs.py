@@ -30,7 +30,7 @@ BLOCO = re.compile(
     r"\[(?P<numero>\d+)\] caminho: (?P<caminho>.*?)\n"
     r"título: (?P<titulo>.*?)\n"
     r"intervalo: (?P<intervalo>.*?)\n"
-    r"trecho:\n(?P<trecho>.*?)(?=\n\n---\n\n|\Z)",
+    r"trecho:\n(?P<trecho>.*?)(?=\n\n---\n\n|\n\nPERGUNTA:|\Z)",
     re.DOTALL,
 )
 

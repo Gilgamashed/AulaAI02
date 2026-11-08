@@ -113,11 +113,11 @@ services:
       # DLQ inexplicável — que foi exatamente o que aconteceu na validação.
       PAGAMENTO_PERMITIR_SIMULACAO_FALHA: ${PAGAMENTO_PERMITIR_SIMULACAO_FALHA:-true}
       MESSAGING_LOG_LEVEL: ${MESSAGING_LOG_LEVEL:-INFO}
-      # Aula 14 (camada de IA — llm_service). O provedor de hoje é o mock em
-      # memória: nada de rede nem de credenciais. O provedor real, quando
-      # chegar, é selecionado por `LLM_PROVIDER` e ganha aqui as suas variáveis
-      # (LLM_BASE_URL/LLM_API_KEY) — a resiliência não muda.
+      # Aula 14/25 (camada de IA — llm_service). O mock continua sendo o padrão
+      # de CI e o plano B da apresentação; `LLM_PROVIDER=gemini` ativa o
+      # adaptador real. A chave vem do .env e nunca é embutida na imagem.
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-mock}
       LLM_TIMEOUT_SEGUNDOS: ${LLM_TIMEOUT_SEGUNDOS:-5.0}
       LLM_MAX_TENTATIVAS: ${LLM_MAX_TENTATIVAS:-3}
@@ -520,6 +520,13 @@ services:
       REDIS_URL_DEDUPE: ${REDIS_URL_DEDUPE:-redis://redis:6379/0}
       MENSAGERIA_BROKER: ${MENSAGERIA_BROKER:-kafka}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-synapse}:${RABBITMQ_PASSWORD:-synapse}@rabbitmq:5672/%2F
+      # Aula 25: a suíte nunca chama a API real do Gemini, mesmo que o .env
+      # de quem roda esteja configurado para a apresentação.
+      LLM_PROVIDER: mock
+      GEMINI_API_KEY: ""
+      LLM_MODEL: mock
+      LLM_MODEL_SQL: mock-sql
+      LLM_MODEL_DOCS: mock-docs
       # Aula 21: fixados para o teste não depender do .env de quem roda a suíte.
       ASK_SQL_MAX_LINHAS: 200
       ASK_SQL_TIMEOUT_MS: 3000

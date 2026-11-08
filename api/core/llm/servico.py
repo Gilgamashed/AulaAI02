@@ -35,6 +35,8 @@ from .erros import (
     LlmTerminal,
     LlmTimeout,
 )
+from .gemini import MODELO_PADRAO as MODELO_GEMINI_PADRAO
+from .gemini import ProvedorGemini
 from .metricas import FALHA, SUCESSO, TERMINAL, llm_metrics
 from .mock import ProvedorMock
 from .mock_docs import ProvedorMockDocs
@@ -203,6 +205,8 @@ class LlmService:
 # ser compartilhado entre elas.
 # ---------------------------------------------------------------------
 PROVIDER_MOCK = "mock"
+PROVIDER_GEMINI = "gemini"
+PROVIDERS = frozenset({PROVIDER_MOCK, PROVIDER_GEMINI})
 TAREFA_ASSIST = "assist"
 TAREFA_SQL = "sql"
 TAREFA_DOCS = "docs"
@@ -229,15 +233,15 @@ def criar_llm_service(tarefa: str = TAREFA_ASSIST) -> LlmService:
 
 
 def _montar(cfg: Any, tarefa: str = TAREFA_ASSIST) -> LlmService:
-    """Lê a configuração e compõe retry + breaker + mock com as políticas."""
+    """Lê a configuração e compõe retry + breaker + provedor da tarefa."""
     provedor_bruto = str(getattr(cfg, "LLM_PROVIDER", PROVIDER_MOCK)).strip().lower()
-    if provedor_bruto != PROVIDER_MOCK:
+    if provedor_bruto not in PROVIDERS:
         raise LlmConfiguracaoInvalida(
-            f"LLM_PROVIDER='{provedor_bruto}' desconhecido. Hoje só existe o "
-            f"provedor '{PROVIDER_MOCK}'; o adaptador do provedor real entra em "
-            "uma iteração futura sem mudar a camada de resiliência."
+            f"LLM_PROVIDER='{provedor_bruto}' desconhecido. Valores aceitos: "
+            f"{', '.join(sorted(PROVIDERS))}."
         )
 
+    timeout_segundos = float(getattr(cfg, "LLM_TIMEOUT_SEGUNDOS", 5.0))
     retry = RetryPolicy(
         max_tentativas=int(getattr(cfg, "LLM_MAX_TENTATIVAS", 3)),
         base_segundos=float(getattr(cfg, "LLM_BACKOFF_BASE_SEGUNDOS", 1.0)),
@@ -249,35 +253,74 @@ def _montar(cfg: Any, tarefa: str = TAREFA_ASSIST) -> LlmService:
         cooldown_segundos=float(getattr(cfg, "LLM_CB_COOLDOWN_SEGUNDOS", 30.0)),
         max_tentativas_half_open=int(getattr(cfg, "LLM_CB_MAX_TENTATIVAS_HALF_OPEN", 2)),
     )
-    provedor: ProvedorLlm = (
-        ProvedorMockSql()
-        if tarefa == TAREFA_SQL
-        else ProvedorMockDocs()
-        if tarefa == TAREFA_DOCS
-        else ProvedorMock()
+    modelo = _modelo_da_tarefa(cfg, tarefa, provedor_bruto)
+    provedor: ProvedorLlm
+    if provedor_bruto == PROVIDER_GEMINI:
+        provedor = ProvedorGemini(
+            api_key=str(getattr(cfg, "GEMINI_API_KEY", "")),
+            modelo=modelo,
+            timeout_segundos=timeout_segundos,
+        )
+    else:
+        provedor = (
+            ProvedorMockSql()
+            if tarefa == TAREFA_SQL
+            else ProvedorMockDocs()
+            if tarefa == TAREFA_DOCS
+            else ProvedorMock()
+        )
+    return LlmService(
+        provedor,
+        retry=retry,
+        breaker=breaker,
+        timeout_segundos=timeout_segundos,
+        modelo=modelo,
+        redacao_ativa=bool(getattr(cfg, "LLM_REDACAO_ATIVA", True)),
+        custo_input_por_1m=float(getattr(cfg, "LLM_CUSTO_INPUT_POR_1M_TOKENS", 0.0)),
+        custo_output_por_1m=float(getattr(cfg, "LLM_CUSTO_OUTPUT_POR_1M_TOKENS", 0.0)),
     )
-    modelo_padrao = (
-        "mock-sql"
-        if tarefa == TAREFA_SQL
-        else "mock-docs"
-        if tarefa == TAREFA_DOCS
-        else "mock"
-    )
-    nome_setting_modelo = (
+
+
+def modelos_efetivos(cfg: Any) -> dict[str, str]:
+    """Modelo efetivo de cada tarefa, sem instanciar provedor nem cliente.
+
+    A resolução repete a da fábrica — inclusive a troca dos defaults `mock*`
+    pelo modelo Gemini padrão — para que a telemetria mostre o modelo que
+    realmente será enviado ao provedor, e não o valor bruto da setting.
+    """
+    provedor = str(getattr(cfg, "LLM_PROVIDER", PROVIDER_MOCK)).strip().lower()
+    return {
+        tarefa: _modelo_da_tarefa(cfg, tarefa, provedor)
+        for tarefa in (TAREFA_ASSIST, TAREFA_SQL, TAREFA_DOCS)
+    }
+
+
+def _modelo_da_tarefa(cfg: Any, tarefa: str, provedor: str) -> str:
+    """Resolve o modelo da tarefa, aceitando os defaults de cada provedor.
+
+    Ao trocar `LLM_PROVIDER` para `gemini`, as variáveis `LLM_MODEL*` podem
+    continuar nos valores históricos do mock (`mock`, `mock-sql`,
+    `mock-docs`). Nesse caso o adaptador usa o modelo Gemini padrão em vez de
+    enviar um nome inexistente ao provedor.
+    """
+    nome_setting = (
         "LLM_MODEL_SQL"
         if tarefa == TAREFA_SQL
         else "LLM_MODEL_DOCS"
         if tarefa == TAREFA_DOCS
         else "LLM_MODEL"
     )
-    modelo = str(getattr(cfg, nome_setting_modelo, modelo_padrao))
-    return LlmService(
-        provedor,
-        retry=retry,
-        breaker=breaker,
-        timeout_segundos=float(getattr(cfg, "LLM_TIMEOUT_SEGUNDOS", 5.0)),
-        modelo=modelo,
-        redacao_ativa=bool(getattr(cfg, "LLM_REDACAO_ATIVA", True)),
-        custo_input_por_1m=float(getattr(cfg, "LLM_CUSTO_INPUT_POR_1M_TOKENS", 0.0)),
-        custo_output_por_1m=float(getattr(cfg, "LLM_CUSTO_OUTPUT_POR_1M_TOKENS", 0.0)),
+    padrao_mock = (
+        "mock-sql"
+        if tarefa == TAREFA_SQL
+        else "mock-docs"
+        if tarefa == TAREFA_DOCS
+        else "mock"
     )
+    padrao = MODELO_GEMINI_PADRAO if provedor == PROVIDER_GEMINI else padrao_mock
+    modelo = str(getattr(cfg, nome_setting, padrao)).strip()
+    if not modelo:
+        return padrao
+    if provedor == PROVIDER_GEMINI and modelo.lower().startswith("mock"):
+        return MODELO_GEMINI_PADRAO
+    return modelo
