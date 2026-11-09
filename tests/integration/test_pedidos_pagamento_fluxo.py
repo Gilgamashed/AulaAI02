@@ -182,3 +182,36 @@ def test_pagamento_tentativa_com_outro_metodo_retorna_409(
     assert segundo.status_code == 409
     assert segundo.data["pagamento_existente"]["metodo"] == "pix"
     assert Pagamento.objects.count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_repost_pagamento_resolvido_nao_publica_novo_evento(
+    client_autenticado, item, broker_capturado, db
+):
+    pedido = _criar_pedido(client_autenticado).data
+
+    primeiro = client_autenticado.post(
+        f"/api/v1/pedidos/{pedido['id']}/pagamento/",
+        {"metodo": "pix", "aprovado": True},
+        format="json",
+    )
+    assert primeiro.status_code == 201
+    publicacoes_antes = broker_capturado.quantidade_publicada
+
+    # O worker já concluiu: a segunda tentativa é uma repetição idempotente.
+    Pagamento.objects.filter(pk=primeiro.data["id"]).update(
+        status=Pagamento.APROVADO
+    )
+
+    repetido = client_autenticado.post(
+        f"/api/v1/pedidos/{pedido['id']}/pagamento/",
+        {"metodo": "pix", "aprovado": True},
+        format="json",
+    )
+
+    assert repetido.status_code == 200, repetido.content
+    assert repetido.data["id"] == primeiro.data["id"]
+    assert repetido.data["republicado"] is False
+    assert repetido.data["evento"]["duplicado"] is True
+    assert Pagamento.objects.count() == 1
+    assert broker_capturado.quantidade_publicada == publicacoes_antes

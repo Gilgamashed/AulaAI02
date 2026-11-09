@@ -49,6 +49,16 @@ API_METRICS_ENABLED = os.environ.get("API_METRICS_ENABLED", "true").strip().lowe
     "off",
 }
 
+# =====================================================================
+# Aula 25 (complemento) — proxy admin-only do inventário FastAPI
+# =====================================================================
+# O navegador fala apenas com o Django (`/api/v1/inventario/`); o Django
+# valida o JWT/papel admin e encaminha para o microsserviço pela rede interna
+# do Compose. `INVENTORY_URL` aceita o host `inventory` no Docker e um
+# `localhost:8001` quando a API roda no venv local.
+INVENTORY_URL = (os.environ.get("INVENTORY_URL") or "http://inventory:8001").strip().rstrip("/")
+INVENTORY_TIMEOUT_SEGUNDOS = float(os.environ.get("INVENTORY_TIMEOUT_SEGUNDOS", "5.0"))
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

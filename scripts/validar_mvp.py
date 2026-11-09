@@ -174,6 +174,28 @@ def _login_demos(contexto: dict[str, Any]) -> str:
     return f"{admin_usuario} + {usuario}"
 
 
+def _inventario_admin(contexto: dict[str, Any]) -> str:
+    """Confere o proxy Django -> FastAPI: admin lê; usuário comum é barrado."""
+    api: ClienteHttp = contexto["api"]
+    resposta = api.requisitar(
+        "GET",
+        "/api/v1/inventario/",
+        headers=_autenticado(contexto["admin_token"]),
+        esperado=(200,),
+    )
+    dados = resposta.dados or {}
+    if dados.get("status") != "ok" or not isinstance(dados.get("data"), list):
+        raise ErroValidacao(f"proxy do inventário devolveu envelope inesperado: {dados!r}")
+
+    api.requisitar(
+        "GET",
+        "/api/v1/inventario/",
+        headers=_autenticado(contexto["user_token"]),
+        esperado=(403,),
+    )
+    return f"itens={len(dados['data'])} admin=200 user=403"
+
+
 def _cache(contexto: dict[str, Any]) -> str:
     api: ClienteHttp = contexto["api"]
     headers = _autenticado(contexto["admin_token"])
@@ -383,6 +405,7 @@ def _passos() -> list[tuple[str, Callable[[dict[str, Any]], str]]]:
     return [
         ("Saúde da API + inventory", _health),
         ("Login demo_admin + demo_user", _login_demos),
+        ("Inventário admin via proxy", _inventario_admin),
         ("Cache do catálogo", _cache),
         ("Criação de pedido", _criar_pedido),
         ("Idempotência do pedido", _idempotencia),

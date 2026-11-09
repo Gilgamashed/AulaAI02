@@ -33,3 +33,7 @@ confluent-kafka>=2.15,<3.0
 # O mock continua sendo o padrão (`LLM_PROVIDER=mock`); a dependência só é
 # exercitada quando `LLM_PROVIDER=gemini` e `GEMINI_API_KEY` estão definidos.
 google-genai>=1.0,<2.0
+# Aula 25 (complemento): cliente HTTP do proxy Django -> inventário FastAPI.
+# O navegador nunca fala com a porta 8001; o Django encaminha as chamadas
+# autenticadas e preserva o envelope do microsserviço.
+httpx>=0.28,<1.0

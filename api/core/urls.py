@@ -8,6 +8,7 @@ from rest_framework_simplejwt.views import (
 
 from .ask_docs.views import AskDocsView
 from .ask_sql.views import AskSqlView
+from .inventory_proxy import InventarioDetalheView, InventarioListaView
 from .throttling import ThrottleMemoriaScope
 from .views import (
     AssistView,
@@ -89,4 +90,17 @@ urlpatterns = [
     # base no índice RAG (README + OpenAPI) e fontes citadas.
     # Restrito ao papel admin — ver AskDocsView.
     path("ask_docs/", AskDocsView.as_view(), name="ask-docs"),
+    # Aula 25 (complemento): CRUD do inventário FastAPI via proxy admin-only.
+    # O caminho em português evita confusão com a rota direta em inglês do
+    # microsserviço (`/api/v1/inventory`).
+    path(
+        "inventario/",
+        InventarioListaView.as_view(),
+        name="inventario-lista",
+    ),
+    path(
+        "inventario/<str:sku>/",
+        InventarioDetalheView.as_view(),
+        name="inventario-detalhe",
+    ),
 ] + router.urls

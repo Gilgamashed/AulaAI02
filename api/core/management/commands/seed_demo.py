@@ -1,9 +1,14 @@
 """Massa de demonstração para a apresentação final (Aula 25).
 
-O comando é manual, idempotente e sem rede. Ele complementa o `seed_auth`
-(que cria os papéis e os usuários demo) com catálogo, pedidos históricos,
-pagamentos e notificações, para que o painel de vendas e o roteiro de
-apresentação tenham o que mostrar sem depender de cliques prévios.
+O comando é manual, idempotente e, por padrão, sem rede. Ele complementa o
+`seed_auth` (que cria os papéis e os usuários demo) com catálogo, pedidos
+históricos, pagamentos e notificações, para que o painel de vendas e o roteiro
+de apresentação tenham o que mostrar sem depender de cliques prévios.
+
+Com `--com-inventario`, o comando também chama o FastAPI e cria/atualiza um
+item de estoque para cada produto ativo do catálogo, com 10-30 unidades
+determinísticas por SKU. A flag é explícita justamente para manter o caminho
+padrão (usado por testes e CI) livre de rede.
 
 Decisões:
 
@@ -18,16 +23,19 @@ Decisões:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from core import notificacoes
+from core.inventory_proxy import chamar_inventario
 from core.models import Category, Item, Notificacao, Pagamento, Pedido
 
 CATEGORIAS: tuple[dict[str, Any], ...] = (
@@ -459,12 +467,24 @@ PEDIDOS: tuple[dict[str, Any], ...] = (
 )
 
 
+def _quantidade_inventario(sku: str) -> int:
+    """Quantidade determinística entre 10 e 30 para um SKU.
+
+    O hash estável evita que duas execuções do seed mudem o estoque; a faixa
+    deixa a tabela visualmente variada na demonstração.
+    """
+    digest = hashlib.sha256(sku.encode("utf-8")).hexdigest()
+    return 10 + (int(digest, 16) % 21)
+
+
 class Command(BaseCommand):
     """Cria a massa mínima de demonstração de forma idempotente."""
 
     help = (
         "Cria catálogo, pedidos, pagamentos e notificações de demonstração "
-        "(idempotente; exige que `seed_auth` já tenha rodado)."
+        "(idempotente; exige que `seed_auth` já tenha rodado). Com "
+        "`--com-inventario`, também popula o FastAPI com 10-30 unidades por "
+        "produto ativo."
     )
 
     def add_arguments(self, parser) -> None:
@@ -473,9 +493,19 @@ class Command(BaseCommand):
             action="store_true",
             help="Não imprime o resumo ao final (uso em scripts).",
         )
+        parser.add_argument(
+            "--com-inventario",
+            action="store_true",
+            dest="com_inventario",
+            help=(
+                "Após criar o catálogo, chama o FastAPI e cria/atualiza um item "
+                "de estoque por produto ativo (10-30 unidades)."
+            ),
+        )
 
     def handle(self, *args, **options) -> None:
         silencioso = bool(options.get("silent"))
+        com_inventario = bool(options.get("com_inventario"))
         usuarios = self._carregar_usuarios()
         agora = timezone.now()
 
@@ -485,16 +515,91 @@ class Command(BaseCommand):
         pagamentos, notificacoes_criadas = self._criar_pagamentos_e_notificacoes(
             pedidos, agora
         )
+        inventario_criados = inventario_atualizados = 0
+        if com_inventario:
+            inventario_criados, inventario_atualizados = self._popular_inventario()
 
         if not silencioso:
-            self.stdout.write(
-                self.style.SUCCESS(
-                    "Massa demo pronta: "
-                    f"{len(categorias)} categorias, {len(produtos)} produtos, "
-                    f"{len(pedidos)} pedidos, {pagamentos} pagamentos e "
-                    f"{notificacoes_criadas} notificações."
-                )
+            resumo = (
+                "Massa demo pronta: "
+                f"{len(categorias)} categorias, {len(produtos)} produtos, "
+                f"{len(pedidos)} pedidos, {pagamentos} pagamentos e "
+                f"{notificacoes_criadas} notificações."
             )
+            if com_inventario:
+                resumo += (
+                    f" Inventário: {inventario_criados} criado(s), "
+                    f"{inventario_atualizados} atualizado(s) "
+                    "(10-30 unidades por SKU)."
+                )
+            self.stdout.write(self.style.SUCCESS(resumo))
+
+    @staticmethod
+    def _popular_inventario() -> tuple[int, int]:
+        """Cria/atualiza um item de inventário para cada produto ativo."""
+        produtos = list(Item.objects.filter(is_active=True).order_by("sku"))
+        if not produtos:
+            raise CommandError(
+                "Nenhum produto ativo no catálogo. Rode `seed_demo` sem "
+                "`--com-inventario` primeiro."
+            )
+
+        criados = 0
+        atualizados = 0
+        try:
+            for produto in produtos:
+                quantidade = _quantidade_inventario(produto.sku)
+                payload = {
+                    "sku": produto.sku,
+                    "name": produto.name,
+                    "quantity": quantidade,
+                    "reserved": 0,
+                    "reorder_level": 5,
+                }
+                status_code, corpo = chamar_inventario(
+                    "POST", "/api/v1/inventory", payload
+                )
+                if status_code == 201:
+                    criados += 1
+                    continue
+                if status_code != 409:
+                    raise CommandError(
+                        "Falha ao criar o inventário de "
+                        f"{produto.sku}: HTTP {status_code} "
+                        f"{_detalhe_inventario(corpo)}"
+                    )
+
+                payload_sem_sku = {
+                    chave: valor for chave, valor in payload.items() if chave != "sku"
+                }
+                status_code, corpo = chamar_inventario(
+                    "PATCH",
+                    f"/api/v1/inventory/{produto.sku}",
+                    payload_sem_sku,
+                )
+                if status_code != 200:
+                    raise CommandError(
+                        "Falha ao atualizar o inventário de "
+                        f"{produto.sku}: HTTP {status_code} "
+                        f"{_detalhe_inventario(corpo)}"
+                    )
+                atualizados += 1
+        except httpx.TimeoutException as exc:
+            raise CommandError(
+                "Tempo esgotado ao popular o inventário. Verifique o serviço "
+                "`inventory` e tente novamente."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise CommandError(
+                "Inventário indisponível. Suba o serviço com "
+                "`docker compose up -d inventory` e repita o comando."
+            ) from exc
+        except ValueError as exc:
+            raise CommandError(
+                "O microsserviço de inventário devolveu uma resposta inválida."
+            ) from exc
+
+        return criados, atualizados
 
     # ------------------------------------------------------------------
     # Blocos do seed
@@ -667,3 +772,12 @@ class Command(BaseCommand):
                 notificacoes_criadas += 1
 
         return pagamentos, notificacoes_criadas
+
+
+def _detalhe_inventario(corpo: Any) -> str:
+    """Extrai a mensagem do envelope do FastAPI para o erro do comando."""
+    if isinstance(corpo, dict):
+        mensagem = corpo.get("message") or corpo.get("detail")
+        if mensagem:
+            return str(mensagem)
+    return str(corpo)

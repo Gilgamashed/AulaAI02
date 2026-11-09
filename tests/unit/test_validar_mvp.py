@@ -26,6 +26,7 @@ class ApiFalsa:
         self.chamadas: list[tuple[str, str]] = []
         self._metricas = 0
         self._pedidos_postados = 0
+        self._inventario = 0
 
     def requisitar(self, metodo, caminho, *, corpo=None, headers=None, esperado=(200,)):
         self.chamadas.append((metodo, caminho))
@@ -35,6 +36,14 @@ class ApiFalsa:
             return _resposta(200, {"status": "ok", "service": "synapseshop-api"})
         if base == "/api/v1/auth/token/":
             return _resposta(200, {"access": "token-de-teste", "refresh": "refresh"})
+        if base == "/api/v1/inventario/":
+            self._inventario += 1
+            if self._inventario == 1:
+                return _resposta(
+                    200,
+                    {"status": "ok", "data": [{"sku": "INV-DEMO-001"}], "message": None},
+                )
+            return _resposta(403, {"detail": "Ação restrita ao papel 'admin'."})
         if base == "/api/v1/cache/metrics/":
             self._metricas += 1
             lookups = 0 if self._metricas == 1 else 2
@@ -100,14 +109,14 @@ def _executar(**kwargs):
     )
 
 
-def test_smoke_completo_termina_ok_com_doze_passos():
+def test_smoke_completo_termina_ok_com_treze_passos():
     resumo = _executar(timeout=1.0)
 
     assert resumo["ok"] is True
     assert resumo["falhas"] == []
     assert resumo["skipped"] == []
-    assert len(resumo["passos"]) == 12
-    assert [passo["numero"] for passo in resumo["passos"]] == list(range(1, 13))
+    assert len(resumo["passos"]) == 13
+    assert [passo["numero"] for passo in resumo["passos"]] == list(range(1, 14))
 
 
 def test_skip_ai_marca_tres_passos_sem_chamar_os_endpoints():
@@ -124,8 +133,9 @@ def test_skip_ai_marca_tres_passos_sem_chamar_os_endpoints():
 
     assert resumo["ok"] is True
     assert resumo["skipped"] == ["IA: /assist/", "IA: /ask_sql/", "IA: /ask_docs/"]
-    assert len(resumo["passos"]) == 9
+    assert len(resumo["passos"]) == 10
     caminhos = {caminho for _, caminho in api.chamadas}
+    assert "/api/v1/inventario/" in caminhos
     assert "/api/v1/assist/" not in caminhos
     assert "/api/v1/ask_sql/" not in caminhos
     assert "/api/v1/ask_docs/" not in caminhos

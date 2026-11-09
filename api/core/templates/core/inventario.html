@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SynapseShop — Inventário FastAPI</title>
+  <style>
+    :root {
+      --fundo: #f4f7fb;
+      --painel: #ffffff;
+      --borda: #d9e2ef;
+      --texto: #17233b;
+      --mudo: #60708a;
+      --primaria: #1f5eff;
+      --primaria-escura: #1646c2;
+      --perigo: #b42318;
+      --raio: 12px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--fundo);
+      color: var(--texto);
+      line-height: 1.45;
+    }
+    header {
+      background: #102449;
+      color: #fff;
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    header h1 { margin: 0; font-size: 1.35rem; letter-spacing: .02em; }
+    header p { margin: 4px 0 0; color: #c9d6ea; font-size: .9rem; }
+    header a { color: #fff; font-weight: 600; }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      gap: 20px;
+    }
+    .card {
+      background: var(--painel);
+      border: 1px solid var(--borda);
+      border-radius: var(--raio);
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(15, 31, 61, .06);
+    }
+    .card h2 { margin-top: 0; font-size: 1.2rem; }
+    .card h3 { font-size: 1.05rem; }
+    .mudo { color: var(--mudo); }
+    code {
+      background: #eef3fb;
+      border-radius: 5px;
+      padding: 1px 5px;
+      font-size: .9em;
+    }
+    .linha {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .status {
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin: 12px 0;
+      font-size: .9rem;
+    }
+    .status.ok { background: #e7f7ee; color: #17633a; }
+    .status.erro { background: #fdecec; color: #8a1c1c; }
+    .status.aviso { background: #fff4d6; color: #7a5300; }
+    .status.neutro { background: #eef3fb; color: #324a6d; }
+    .restrito { border-left: 5px solid #d4a017; }
+    .restrito a { color: var(--primaria); font-weight: 600; }
+    .tabela-rolagem { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      min-width: 720px;
+    }
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid var(--borda);
+      padding: 9px 10px;
+      vertical-align: middle;
+    }
+    th { background: #f7f9fd; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; }
+    td button + button { margin-left: 6px; }
+    .formulario {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      align-items: end;
+      margin-top: 8px;
+    }
+    .formulario label {
+      display: grid;
+      gap: 5px;
+      font-size: .88rem;
+      font-weight: 600;
+      color: #324a6d;
+    }
+    .formulario input {
+      width: 100%;
+      border: 1px solid var(--borda);
+      border-radius: 8px;
+      padding: 9px 10px;
+      font: inherit;
+      color: var(--texto);
+      background: #fff;
+    }
+    .formulario input[readonly] { background: #f2f5fa; color: var(--mudo); }
+    .formulario .botoes { grid-column: 1 / -1; margin: 4px 0 0; }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 14px;
+      background: var(--primaria);
+      color: #fff;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: var(--primaria-escura); }
+    button.secundario { background: #e8eefb; color: #1f3d75; }
+    button.secundario:hover { background: #d8e3f8; }
+    button.perigo { background: #fdecec; color: var(--perigo); }
+    button.perigo:hover { background: #fbd9d9; }
+    @media (max-width: 640px) {
+      header { padding: 16px; }
+      main { padding: 14px; }
+      .card { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Inventário FastAPI</h1>
+    <p>CRUD real em <code>inventory_items</code> via proxy admin-only do Django.</p>
+  </div>
+  <a href="/app/">Voltar ao app</a>
+</header>
+
+<main>
+  <section id="inventario-restrito" class="card restrito" hidden>
+    <h2>Acesso restrito</h2>
+    <p>Esta página é exclusiva do papel <strong>admin</strong>.</p>
+    <p>
+      Entre no <a href="/app/">/app/</a> com <strong>demo_admin</strong> e clique em
+      <strong>Inventário FastAPI</strong>.
+    </p>
+  </section>
+
+  <section id="inventario-conteudo" class="card" hidden>
+    <h2>Itens de estoque</h2>
+    <p class="mudo">
+      O HTML é servido pelo Django; as operações abaixo são executadas pelo
+      FastAPI via <code>/api/v1/inventario/</code>. O navegador não fala com a
+      porta 8001.
+    </p>
+
+    <div class="linha">
+      <button id="btn-atualizar" type="button" class="secundario">Atualizar lista</button>
+      <button id="btn-novo" type="button" class="secundario">Novo item</button>
+    </div>
+    <p id="inventario-status" class="status neutro" role="status" aria-live="polite"></p>
+
+    <div class="tabela-rolagem">
+      <table>
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Nome</th>
+            <th>Qtd.</th>
+            <th>Reservado</th>
+            <th>Reposição</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="inventario-lista"></tbody>
+      </table>
+    </div>
+
+    <h3 id="form-titulo">Novo item</h3>
+    <form id="inventario-form" class="formulario">
+      <label>SKU
+        <input id="inventario-sku" pattern="[A-Z]{2,4}-[A-Z0-9-]+" placeholder="INV-DEMO-001" required>
+      </label>
+      <label>Nome
+        <input id="inventario-nome" placeholder="Item de demonstração" required>
+      </label>
+      <label>Quantidade
+        <input id="inventario-quantidade" type="number" min="0" step="1" value="0" required>
+      </label>
+      <label>Reservado
+        <input id="inventario-reservado" type="number" min="0" step="1" value="0">
+      </label>
+      <label>Nível de reposição
+        <input id="inventario-reorder" type="number" min="0" step="1" value="0">
+      </label>
+      <div class="linha botoes">
+        <button id="btn-criar" type="submit">Criar</button>
+        <button id="btn-atualizar-item" type="button" class="secundario" hidden>Atualizar</button>
+        <button id="btn-excluir-item" type="button" class="perigo" hidden>Excluir</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+{% verbatim %}
+<script>
+(function () {
+  'use strict';
+
+  const API = '/api/v1';
+  const CHAVE_ACCESS = 'synapse.access';
+  const CHAVE_REFRESH = 'synapse.refresh';
+  const TIMEOUT_MS = 15000;
+  const SKU_PATTERN = /^[A-Z]{2,4}-[A-Z0-9-]+$/;
+
+  let access = sessionStorage.getItem(CHAVE_ACCESS) || '';
+  let skuSelecionado = '';
+  let itens = [];
+
+  function el(id) {
+    return document.getElementById(id);
+  }
+
+  function mostrarStatus(mensagem, tipo) {
+    const alvo = el('inventario-status');
+    alvo.textContent = mensagem;
+    alvo.className = 'status ' + (tipo || 'neutro');
+  }
+
+  function mostrarRestrito() {
+    el('inventario-conteudo').hidden = true;
+    el('inventario-restrito').hidden = false;
+    mostrarStatus('', 'neutro');
+  }
+
+  function mostrarConteudo() {
+    el('inventario-restrito').hidden = true;
+    el('inventario-conteudo').hidden = false;
+  }
+
+  async function renovarToken() {
+    const refresh = sessionStorage.getItem(CHAVE_REFRESH);
+    if (!refresh) return false;
+    try {
+      const resposta = await fetch(API + '/auth/token/refresh/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh: refresh })
+      });
+      if (!resposta.ok) return false;
+      const dados = await resposta.json();
+      if (!dados.access) return false;
+      access = dados.access;
+      sessionStorage.setItem(CHAVE_ACCESS, access);
+      return true;
+    } catch (_erro) {
+      return false;
+    }
+  }
+
+  async function requisitar(caminho, opcoes, tentarRenovar) {
+    const config = opcoes || {};
+    const controller = new AbortController();
+    const temporizador = setTimeout(function () { controller.abort(); }, TIMEOUT_MS);
+    const headers = new Headers(config.headers || {});
+    if (config.body !== undefined) {
+      headers.set('Content-Type', 'application/json');
+    }
+    if (access) {
+      headers.set('Authorization', 'Bearer ' + access);
+    }
+
+    let resposta;
+    try {
+      resposta = await fetch(API + caminho, {
+        method: config.method || 'GET',
+        headers: headers,
+        body: config.body === undefined ? undefined : JSON.stringify(config.body),
+        signal: controller.signal
+      });
+    } catch (erro) {
+      clearTimeout(temporizador);
+      if (erro && erro.name === 'AbortError') {
+        throw new Error('Tempo esgotado ao falar com a API (15 s).');
+      }
+      throw new Error('Falha de rede ao falar com a API.');
+    }
+    clearTimeout(temporizador);
+
+    if (resposta.status === 401 && access && tentarRenovar !== false) {
+      const renovado = await renovarToken();
+      if (renovado) {
+        return requisitar(caminho, config, false);
+      }
+    }
+
+    const texto = await resposta.text();
+    let dados = null;
+    try {
+      dados = texto ? JSON.parse(texto) : null;
+    } catch (_erro) {
+      dados = null;
+    }
+
+    if (!resposta.ok) {
+      const detalhe = (dados && (dados.message || dados.detail)) ||
+        (texto ? texto.slice(0, 200) : 'sem corpo');
+      const erro = new Error('HTTP ' + resposta.status + ': ' + detalhe);
+      erro.status = resposta.status;
+      erro.dados = dados;
+      throw erro;
+    }
+    return { status: resposta.status, dados: dados };
+  }
+
+  function renderizar() {
+    const corpo = el('inventario-lista');
+    while (corpo.firstChild) corpo.removeChild(corpo.firstChild);
+
+    if (!itens.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 6;
+      td.className = 'mudo';
+      td.textContent = 'Nenhum item cadastrado.';
+      tr.appendChild(td);
+      corpo.appendChild(tr);
+      return;
+    }
+
+    itens.forEach(function (item) {
+      const tr = document.createElement('tr');
+      [item.sku, item.name, item.quantity, item.reserved, item.reorder_level].forEach(function (valor) {
+        const td = document.createElement('td');
+        td.textContent = valor === null || valor === undefined ? '—' : String(valor);
+        tr.appendChild(td);
+      });
+
+      const acoes = document.createElement('td');
+      const editar = document.createElement('button');
+      editar.type = 'button';
+      editar.className = 'secundario';
+      editar.textContent = 'Editar';
+      editar.addEventListener('click', function () { selecionar(item); });
+
+      const excluir = document.createElement('button');
+      excluir.type = 'button';
+      excluir.className = 'perigo';
+      excluir.textContent = 'Excluir';
+      excluir.addEventListener('click', function () { excluirItem(item); });
+
+      acoes.appendChild(editar);
+      acoes.appendChild(excluir);
+      tr.appendChild(acoes);
+      corpo.appendChild(tr);
+    });
+  }
+
+  function selecionar(item) {
+    skuSelecionado = item.sku;
+    el('inventario-sku').value = item.sku;
+    el('inventario-sku').readOnly = true;
+    el('inventario-nome').value = item.name;
+    el('inventario-quantidade').value = item.quantity;
+    el('inventario-reservado').value = item.reserved;
+    el('inventario-reorder').value = item.reorder_level;
+    el('form-titulo').textContent = 'Editar ' + item.sku;
+    el('btn-criar').hidden = true;
+    el('btn-atualizar-item').hidden = false;
+    el('btn-excluir-item').hidden = false;
+    mostrarStatus('Editando ' + item.sku + '.', 'neutro');
+  }
+
+  function novoItem() {
+    skuSelecionado = '';
+    el('inventario-form').reset();
+    el('inventario-sku').readOnly = false;
+    el('inventario-quantidade').value = '0';
+    el('inventario-reservado').value = '0';
+    el('inventario-reorder').value = '0';
+    el('form-titulo').textContent = 'Novo item';
+    el('btn-criar').hidden = false;
+    el('btn-atualizar-item').hidden = true;
+    el('btn-excluir-item').hidden = true;
+    mostrarStatus('Preencha os campos para criar um item.', 'neutro');
+    el('inventario-sku').focus();
+  }
+
+  function payloadDoFormulario(incluirSku) {
+    const payload = {
+      name: el('inventario-nome').value.trim(),
+      quantity: Number(el('inventario-quantidade').value),
+      reserved: Number(el('inventario-reservado').value),
+      reorder_level: Number(el('inventario-reorder').value)
+    };
+    if (incluirSku) {
+      payload.sku = el('inventario-sku').value.trim();
+    }
+    return payload;
+  }
+
+  function validarFormulario(incluirSku) {
+    const sku = el('inventario-sku').value.trim();
+    const nome = el('inventario-nome').value.trim();
+    if (incluirSku && !SKU_PATTERN.test(sku)) {
+      mostrarStatus('SKU inválido. Use o formato XXXX-AAAA-BBBB, por exemplo INV-DEMO-001.', 'erro');
+      return null;
+    }
+    if (!nome) {
+      mostrarStatus('Informe o nome do item.', 'erro');
+      return null;
+    }
+    const payload = payloadDoFormulario(incluirSku);
+    if (!Number.isInteger(payload.quantity) || payload.quantity < 0 ||
+        !Number.isInteger(payload.reserved) || payload.reserved < 0 ||
+        !Number.isInteger(payload.reorder_level) || payload.reorder_level < 0) {
+      mostrarStatus('Quantidade, reservado e reposição devem ser inteiros maiores ou iguais a zero.', 'erro');
+      return null;
+    }
+    return payload;
+  }
+
+  async function carregar(mensagem) {
+    if (!access) {
+      mostrarRestrito();
+      return;
+    }
+    mostrarStatus('Carregando itens...', 'neutro');
+    try {
+      const resposta = await requisitar('/inventario/');
+      const dados = resposta.dados || {};
+      itens = Array.isArray(dados.data) ? dados.data : [];
+      mostrarConteudo();
+      renderizar();
+      if (skuSelecionado && !itens.some(function (item) { return item.sku === skuSelecionado; })) {
+        novoItem();
+      }
+      mostrarStatus(
+        mensagem || (itens.length ? itens.length + ' item(ns) carregado(s).' : 'Nenhum item cadastrado.'),
+        mensagem ? 'ok' : 'neutro'
+      );
+    } catch (erro) {
+      if (erro.status === 401 || erro.status === 403) {
+        mostrarRestrito();
+        return;
+      }
+      mostrarConteudo();
+      mostrarStatus(erro.message, erro.status === 503 || erro.status === 504 ? 'aviso' : 'erro');
+    }
+  }
+
+  async function criar(evento) {
+    evento.preventDefault();
+    const payload = validarFormulario(true);
+    if (!payload) return;
+    try {
+      await requisitar('/inventario/', { method: 'POST', body: payload });
+      novoItem();
+      await carregar('Item ' + payload.sku + ' criado (HTTP 201).');
+    } catch (erro) {
+      if (erro.status === 401 || erro.status === 403) {
+        mostrarRestrito();
+        return;
+      }
+      mostrarStatus(erro.message, erro.status === 409 ? 'aviso' : 'erro');
+    }
+  }
+
+  async function atualizarItem() {
+    if (!skuSelecionado) return;
+    const payload = validarFormulario(false);
+    if (!payload) return;
+    try {
+      await requisitar('/inventario/' + encodeURIComponent(skuSelecionado) + '/', {
+        method: 'PATCH',
+        body: payload
+      });
+      await carregar('Item ' + skuSelecionado + ' atualizado (HTTP 200).');
+    } catch (erro) {
+      if (erro.status === 401 || erro.status === 403) {
+        mostrarRestrito();
+        return;
+      }
+      mostrarStatus(erro.message, erro.status === 404 ? 'aviso' : 'erro');
+    }
+  }
+
+  async function excluirItem(item) {
+    if (!window.confirm('Excluir o item ' + item.sku + '?')) return;
+    try {
+      await requisitar('/inventario/' + encodeURIComponent(item.sku) + '/', { method: 'DELETE' });
+      if (skuSelecionado === item.sku) novoItem();
+      await carregar('Item ' + item.sku + ' removido (HTTP 204).');
+    } catch (erro) {
+      if (erro.status === 401 || erro.status === 403) {
+        mostrarRestrito();
+        return;
+      }
+      mostrarStatus(erro.message, erro.status === 404 ? 'aviso' : 'erro');
+    }
+  }
+
+  function iniciar() {
+    el('btn-atualizar').addEventListener('click', function () { carregar(); });
+    el('btn-novo').addEventListener('click', novoItem);
+    el('inventario-form').addEventListener('submit', criar);
+    el('btn-atualizar-item').addEventListener('click', atualizarItem);
+    el('btn-excluir-item').addEventListener('click', function () {
+      const item = itens.find(function (candidato) { return candidato.sku === skuSelecionado; });
+      if (item) excluirItem(item);
+    });
+
+    if (!access) {
+      mostrarRestrito();
+      return;
+    }
+    carregar();
+  }
+
+  document.addEventListener('DOMContentLoaded', iniciar);
+})();
+</script>
+{% endverbatim %}
+</body>
+</html>

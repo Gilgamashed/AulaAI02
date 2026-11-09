@@ -86,6 +86,18 @@ class AppFrontendView(TemplateView):
         return contexto
 
 
+class AppInventarioView(TemplateView):
+    """Página admin-only do inventário FastAPI (Aula 25 — complemento).
+
+    O HTML é um shell same-origin: quem decide exibir os dados é o JavaScript,
+    lendo o JWT do ``sessionStorage``; a autorização real fica no proxy
+    ``/api/v1/inventario/`` (``IsAdminRole``). Sem token/papel admin, a página
+    mostra o painel de acesso restrito e não carrega nenhum item.
+    """
+
+    template_name = "core/inventario.html"
+
+
 # =====================================================================
 # Aula 8 — instrumentação do padrão cache-aside
 # =====================================================================
@@ -655,6 +667,15 @@ class PedidoViewSet(viewsets.ModelViewSet):
         chave = _chave_pagamento(
             pedido.pk, dados["metodo"], bool(dados["aprovado"])
         )
+
+        # Caminho normal de repetição: evita o INSERT que dispararia a
+        # constraint e o ERROR esperado no log do PostgreSQL. A constraint
+        # continua sendo a barreira para a corrida entre duas requisições.
+        existente = Pagamento.objects.filter(pedido=pedido).first()
+        if existente is not None:
+            return self._republicar_pagamento(
+                pedido, chave, dados.get("canal") or ""
+            )
 
         try:
             with transaction.atomic():

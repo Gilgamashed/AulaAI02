@@ -267,6 +267,7 @@
     </form>
     <p id="pagamento-status" class="status neutro" role="status"></p>
     <p id="pagamento-aviso" class="status aviso" role="status" hidden></p>
+    <p id="pagamento-idempotencia" class="status ok" role="status" hidden></p>
     <div id="pagamento-resultado"></div>
     <h3>Notificações do pedido</h3>
     <div id="notificacoes-lista" class="mudo">Nenhuma consulta realizada ainda.</div>
@@ -343,6 +344,7 @@
       <pre id="llm-saida">Não consultado.</pre>
     </div>
     <p class="links">
+      <a id="link-inventario" href="/app/inventario/" hidden>Inventário FastAPI</a>
       <a id="link-streamlit" href="http://localhost:8501" target="_blank" rel="noopener noreferrer">Painel Streamlit</a>
       <a href="/docs/" target="_blank" rel="noopener noreferrer">Swagger</a>
       <a href="/redoc/" target="_blank" rel="noopener noreferrer">ReDoc</a>
@@ -431,8 +433,8 @@
     return String(dados);
   }
 
-  function montarUrl(caminho) {
-    if (/^https?:\/\//i.test(caminho)) return caminho;
+  function montarUrl(caminho, semApi = false) {
+    if (semApi || /^https?:\/\//i.test(caminho)) return caminho;
     return caminho.startsWith('/api/v1') ? caminho : API + caminho;
   }
 
@@ -474,7 +476,7 @@
 
     let resposta;
     try {
-      resposta = await fetch(montarUrl(caminho), {
+      resposta = await fetch(montarUrl(caminho, opcoes.semApi), {
         method: opcoes.method || 'GET',
         headers,
         body: opcoes.body === undefined ? undefined : JSON.stringify(opcoes.body),
@@ -542,6 +544,8 @@
     el('login-formulario').hidden = autenticado;
     const blocoProduto = el('bloco-produto');
     if (blocoProduto) blocoProduto.hidden = !autenticado;
+    const linkInventario = el('link-inventario');
+    if (linkInventario) linkInventario.hidden = estado.papel !== 'admin';
   }
 
   async function detectarPapel() {
@@ -898,10 +902,15 @@
     const headers = {};
     const simular = el('pagamento-simular-falha');
     const aviso = el('pagamento-aviso');
+    const idem = el('pagamento-idempotencia');
     if (simular && simular.checked) headers['X-Simular-Falha'] = 'true';
     if (aviso) {
       aviso.hidden = true;
       aviso.textContent = '';
+    }
+    if (idem) {
+      idem.hidden = true;
+      idem.textContent = '';
     }
 
     mostrarStatus('pagamento-status', 'Registrando pagamento...', 'neutro');
@@ -911,14 +920,55 @@
         body: body,
         headers: headers
       });
-      renderizarPagamento(dados, 'Pagamento registrado (HTTP ' + status + ')');
-      if (simular && simular.checked && aviso) {
-        aviso.textContent = 'Pagamento marcado para falha: a DLQ receberá a mensagem após a escada de reentrega.';
-        aviso.hidden = false;
+      if (status === 201) {
+        renderizarPagamento(dados, 'Pagamento novo registrado (HTTP 201)');
+        if (simular && simular.checked && aviso) {
+          aviso.textContent = 'Pagamento marcado para falha: a DLQ receberá a mensagem após a escada de reentrega.';
+          aviso.hidden = false;
+        }
+        mostrarStatus('pagamento-status', 'Aguardando o worker concluir...', 'neutro');
+        acompanharPagamento(pedidoId);
+      } else {
+        const evento = dados.evento || {};
+        const repetido = dados.republicado === false || evento.duplicado === true;
+        renderizarPagamento(
+          dados,
+          repetido
+            ? 'Pagamento já existente (HTTP 200 — idempotência)'
+            : 'Pagamento existente: evento republicado (HTTP 200)'
+        );
+        if (repetido) {
+          if (idem) {
+            idem.textContent = 'Idempotência: nenhum novo pagamento, evento ou notificação foi criado.';
+            idem.hidden = false;
+          }
+          mostrarStatus(
+            'pagamento-status',
+            'Pagamento já estava ' + (dados.status || 'resolvido') + '; repetição idempotente.',
+            'ok'
+          );
+          carregarNotificacoes(pedidoId);
+        } else {
+          if (simular && simular.checked && aviso) {
+            aviso.textContent = 'Pagamento marcado para falha: a DLQ receberá a mensagem após a escada de reentrega.';
+            aviso.hidden = false;
+          }
+          mostrarStatus('pagamento-status', 'Evento republicado; aguardando o worker...', 'neutro');
+          acompanharPagamento(pedidoId);
+        }
       }
-      mostrarStatus('pagamento-status', 'Aguardando o worker concluir...', 'neutro');
-      acompanharPagamento(pedidoId);
     } catch (erro) {
+      if (erro.status === 409) {
+        if (idem) {
+          idem.textContent = 'Este pedido já tem outro pagamento; nenhum novo evento foi criado.';
+          idem.hidden = false;
+        }
+        if (erro.dados && erro.dados.pagamento_existente) {
+          renderizarPagamento(erro.dados.pagamento_existente, 'Pagamento existente (HTTP 409)');
+        }
+        mostrarStatus('pagamento-status', erro.message, 'aviso');
+        return;
+      }
       mostrarStatus('pagamento-status', erro.message, 'erro');
       if (erro.status === 503) {
         acompanharPagamento(pedidoId);
@@ -938,6 +988,16 @@
     adicionarDefinicao(dl, 'Aprovado', dados.aprovado ? 'sim' : 'não');
     adicionarDefinicao(dl, 'Motivo da recusa', dados.motivo_recusa || '—');
     adicionarDefinicao(dl, 'Tentativas', dados.tentativas !== undefined ? dados.tentativas : '—');
+    if (dados.idempotency_key) {
+      adicionarDefinicao(dl, 'Idempotency-Key', dados.idempotency_key);
+    }
+    if (dados.republicado !== undefined) {
+      adicionarDefinicao(
+        dl,
+        'Repetição',
+        dados.republicado ? 'evento republicado' : 'sim — nenhum evento novo'
+      );
+    }
     alvo.appendChild(dl);
     renderizarJson(alvo, 'Evento publicado', dados.evento);
   }
@@ -1078,7 +1138,12 @@
     const corpo = document.createElement('tbody');
     linhas.forEach((linha) => {
       const tr = document.createElement('tr');
-      (Array.isArray(linha) ? linha : [linha]).forEach((valor) => {
+      const valores = Array.isArray(linha)
+        ? linha
+        : (linha && typeof linha === 'object')
+          ? colunas.map((coluna) => linha[coluna])
+          : [linha];
+      valores.forEach((valor) => {
         tr.appendChild(criar('td', valor === null || valor === undefined ? '—' : String(valor)));
       });
       corpo.appendChild(tr);
@@ -1132,7 +1197,7 @@
 
   async function carregarSaude() {
     try {
-      const { dados } = await requisitar('/health', { semAuth: true });
+      const { dados } = await requisitar('/health', { semAuth: true, semApi: true });
       el('health-saida').textContent = JSON.stringify(dados, null, 2);
       mostrarStatus('operacao-status', 'Saúde consultada.', 'ok');
     } catch (erro) {
@@ -1208,6 +1273,20 @@
     });
   }
 
+  async function recarregarDadosAutenticados() {
+    try {
+      await carregarCategorias();
+    } catch (erro) {
+      mostrarStatus('catalogo-status', 'Falha ao recarregar categorias: ' + erro.message, 'erro');
+    }
+    await Promise.allSettled([
+      carregarCatalogo(),
+      carregarPedidos(),
+      carregarMetricasCache(),
+      carregarMetricasLlm()
+    ]);
+  }
+
   async function entrar(evento) {
     evento.preventDefault();
     const usuario = el('login-usuario').value.trim();
@@ -1227,11 +1306,12 @@
       atualizarSessao();
       el('login-senha').value = '';
       mostrarStatus('login-status', 'Sessão iniciada como ' + estado.papel + '.', 'ok');
-      await Promise.all([carregarPedidos(), carregarMetricasCache(), carregarMetricasLlm()]);
     } catch (erro) {
       limparSessao();
       mostrarStatus('login-status', erro.message, 'erro');
+      return;
     }
+    await recarregarDadosAutenticados();
   }
 
   function sair() {
@@ -1239,12 +1319,17 @@
     mostrarStatus('login-status', 'Sessão encerrada.', 'ok');
     el('login-usuario').focus();
     carregarPedidos();
+    carregarCatalogo();
     el('cache-saida').textContent = 'Não consultado.';
     el('llm-saida').textContent = 'Não consultado.';
     if (el('llm-resumo')) el('llm-resumo').textContent = 'Não consultado.';
     if (el('pagamento-aviso')) {
       el('pagamento-aviso').hidden = true;
       el('pagamento-aviso').textContent = '';
+    }
+    if (el('pagamento-idempotencia')) {
+      el('pagamento-idempotencia').hidden = true;
+      el('pagamento-idempotencia').textContent = '';
     }
   }
 

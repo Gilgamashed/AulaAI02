@@ -152,6 +152,11 @@ services:
       ASK_DOCS_MAX_TOKENS: ${ASK_DOCS_MAX_TOKENS:-600}
       ASK_DOCS_LOG_LEVEL: ${ASK_DOCS_LOG_LEVEL:-INFO}
       API_METRICS_ENABLED: ${API_METRICS_ENABLED:-true}
+      # Aula 25 (complemento): o Django é o único consumidor do inventário no
+      # fluxo da página /app/inventario/. O proxy valida o JWT/papel admin e
+      # chama o FastAPI pela rede interna do Compose.
+      INVENTORY_URL: ${INVENTORY_URL:-http://inventory:8001}
+      INVENTORY_TIMEOUT_SEGUNDOS: ${INVENTORY_TIMEOUT_SEGUNDOS:-5.0}
     volumes:
       # Aula 24: o índice SQLite do RAG é reconstruído no startup, mas o
       # volume preserva os chunks entre recriações do container.
@@ -205,8 +210,11 @@ services:
     build: ./services/inventory
     container_name: synapseshop_inventory
     restart: unless-stopped
+    # Aula 25 (complemento): a UI funcional é o proxy admin-only do Django em
+    # /app/inventario/. A porta direta do FastAPI fica restrita ao localhost
+    # para manter o Swagger/healthcheck de demonstração sem expô-la à rede.
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     # Aula 6: o inventory ganha persistência no PostgreSQL compartilhado com o
     # Django. Ele só inicia após o banco estar saudável; no startup aplica as
     # próprias migrações (Alembic) e o Django continua dono das próprias
