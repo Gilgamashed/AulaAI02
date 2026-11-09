@@ -73,7 +73,7 @@ Aula 20). São **oito serviços**:
 | `db`         | `postgres:16-alpine` | Banco PostgreSQL (volume `pgdata` para persistência); porta interna `db:5432` **publicada em `localhost:5432`** para permitir comandos de gerenciamento locais (venv) |
 | `redis`      | `redis:7-alpine`   | Cache-aside do microsserviço de estoque (Aula 8) **e** janela de dedupe dos dois fluxos Kafka (Aulas 9 a 11) |
 | `kafka`      | Apache Kafka (KRaft, modo único nó) | Broker de mensageria. Roda com `auto.create.topics.enable=false`: quem cria os tópicos é a aplicação (ver "Subir o ambiente") |
-| `inventory`  | build de `services/inventory/Dockerfile` | Microsserviço FastAPI de estoque: `/health`, `/docs` e CRUD em `/api/v1/inventory` (porta 8001); persistência própria no PostgreSQL governada pelo Alembic (Aula 6) |
+| `inventory`  | build de `services/inventory/Dockerfile` | Microsserviço FastAPI de estoque: `/health`, `/docs` e CRUD em `/api/v1/inventory` (porta 8001 publicada só em `127.0.0.1`); persistência própria no PostgreSQL governada pelo Alembic (Aula 6). A UI admin fica em `/app/inventario/`, via proxy do Django |
 | `worker-kafka` | mesma imagem da `api` | Consumidor do fluxo de **pedidos** (`pedidos.criados`, grupo `synapseshop-pedidos`) |
 | `worker-pagamentos` | mesma imagem da `api` | Consumidor do fluxo de **pagamentos** (`pagamentos.registrados`, grupo `synapseshop-pagamentos`) |
 | `dashboard` | build de `dashboard/Dockerfile` | Painel Streamlit: analítico (Aula 19) e de desempenho da API (Aula 20); conexão segura, SQLi mitigado, filtros e cache (porta 8501) |
@@ -129,14 +129,20 @@ pode repetir à vontade. As credenciais estão na seção
 [Autenticação JWT](docs/autenticacao.md).
 
 Para a apresentação, o `seed_demo` complementa o `seed_auth` com catálogo,
-pedidos históricos, pagamentos e notificações (também idempotente):
+pedidos históricos, pagamentos e notificações (também idempotente). Com
+`--com-inventario`, ele também cria/atualiza um item de estoque para cada
+produto ativo, com 10-30 unidades determinísticas por SKU:
 
 ```bash
-docker compose exec api python api/manage.py seed_demo
+docker compose exec api python api/manage.py seed_demo --com-inventario
 ```
 
+Sem a flag, o comando continua sem rede e não toca no FastAPI.
+
 O mock de front-end fica em [http://localhost:8000/app/](http://localhost:8000/app/)
-e o smoke ponta a ponta pode ser executado do host:
+e a página admin-only do inventário em
+[http://localhost:8000/app/inventario/](http://localhost:8000/app/inventario/).
+O smoke ponta a ponta pode ser executado do host:
 
 ```bash
 python scripts/validar_mvp.py
@@ -152,6 +158,8 @@ curl http://localhost:8000/health
 
 curl http://localhost:8001/health
 # {"status": "ok", "service": "synapseshop-inventory"}
+# (a porta 8001 é publicada apenas em 127.0.0.1; o fluxo suportado da UI é
+#  /app/inventario/, que passa pelo proxy admin-only do Django)
 ```
 
 `fluxos` traz a **topologia** de cada fluxo (tópico, grupo, partições, retenção,
@@ -207,6 +215,9 @@ automaticamente no startup (o banco já está saudável via `depends_on`).
 | `/api/v1/ask_sql/`             | POST (admin)              | Pergunta em português → SELECT validado     |
 | `/api/v1/ask_docs/`            | POST (admin)              | Pergunta técnica → resposta RAG com fontes  |
 | `/app/`                        | GET                       | Mock de front-end same-origin (Aula 25)     |
+| `/app/inventario/`             | GET                       | Página do inventário FastAPI (admin-only)   |
+| `/api/v1/inventario/`          | GET, POST                 | Proxy admin-only para o inventory (FastAPI) |
+| `/api/v1/inventario/{sku}/`    | GET, PATCH, DELETE        | Detalhe/atualização/exclusão via proxy      |
 
 Status codes: **200** OK, **201** Created, **204** No Content, **400** Bad
 Request, **404** Not Found. Validações customizadas: preço não-negativo, SKU no
@@ -806,9 +817,10 @@ Documentação técnica e roteiro de teste:
 
 ## Fechamento do MVP, Demo e IA Real (Aula 25)
 
-A Aula 25 fecha o MVP com três entregas complementares: evidências
+A Aula 25 fecha o MVP com três entregas complementares — evidências
 reproduzíveis, um mock de front-end para a apresentação e o provedor real
-Gemini na camada de IA.
+Gemini na camada de IA — e um complemento de demonstração do inventário
+FastAPI, admin-only, dentro do `/app/`.
 
 ### Front-end de demonstração
 
@@ -820,7 +832,42 @@ sem CORS, sem build e sem container novo. A página permite:
 - carrinho, criação de pedido com `Idempotency-Key` e reenvio idempotente;
 - pagamento, polling do worker e notificações;
 - abas de IA (`/assist/`, `/ask_sql/` e `/ask_docs/`);
-- cartões de saúde, cache e métricas de IA.
+- cartões de saúde, cache e métricas de IA;
+- link **Inventário FastAPI** para administradores.
+
+Após o login bem-sucedido, o catálogo é recarregado automaticamente: os botões
+de **Editar/Excluir** e o link do inventário aparecem sem F5. No logout, os
+controles de admin também somem sem recarregar a página.
+
+#### Inventário FastAPI (admin-only)
+
+O link **Inventário FastAPI** só aparece no `/app/` quando o papel é `admin`.
+A página `GET /app/inventario/` oferece listar, criar, editar e excluir itens
+de `inventory_items`; o HTML é servido pelo Django, mas o CRUD é executado pelo
+**FastAPI**. O caminho é:
+
+```text
+Navegador -> /app/inventario/ (Django)
+          -> /api/v1/inventario/ (DRF + IsAdminRole)
+          -> http://inventory:8001/api/v1/inventory (FastAPI)
+```
+
+O proxy valida o JWT e o papel `admin`, repassa `201/204/400/404/409` e devolve
+`503`/`504` quando o microsserviço está fora ou demora. O navegador nunca fala
+com a porta 8001; por isso não há CORS. A porta direta do FastAPI fica publicada
+somente em `127.0.0.1` (Swagger/depuração local), e o serviço direto continua
+sem autenticação — o caminho oficial da UI é o proxy.
+
+O `seed_demo --com-inventario` deixa a demonstração pronta: cada produto ativo
+do catálogo ganha um item em `inventory_items` com quantidade entre **10 e 30**
+(gerada de forma determinística pelo SKU, para a segunda execução não mudar o
+estoque). Se um SKU já existir, o comando usa `PATCH`; se não, `POST`. Itens
+extras fora do catálogo não são apagados.
+
+Sem token admin, `/app/inventario/` mostra “acesso restrito” e não carrega
+dados; o proxy responde `401` para anônimo e `403` para o papel `user`. O HTML
+é um shell público: se for necessário que o próprio `GET` da página retorne
+`403`, isso exige um cookie/sessão server-side (hardening separado).
 
 ### Provedor Gemini
 
@@ -855,15 +902,15 @@ o modo determinístico na demo, use `LLM_PROVIDER=mock` e reinicie a API.
 
 ```bash
 docker compose exec api python api/manage.py seed_auth
-docker compose exec api python api/manage.py seed_demo
+docker compose exec api python api/manage.py seed_demo --com-inventario
 docker compose exec api python api/manage.py indexar_docs
 python scripts/validar_mvp.py
 ```
 
-O script `validar_mvp.py` executa doze passos (saúde, login, cache, pedido,
-idempotência, pagamento, worker, três recursos de IA, `/app/` e dashboard),
-marca os passos de IA como `SKIP` com `--skip-ai` e devolve exit code diferente
-de zero em qualquer falha obrigatória.
+O script `validar_mvp.py` executa treze passos (saúde, login, inventário admin
+via proxy, cache, pedido, idempotência, pagamento, worker, três recursos de IA,
+`/app/` e dashboard), marca os passos de IA como `SKIP` com `--skip-ai` e
+devolve exit code diferente de zero em qualquer falha obrigatória.
 
 Evidências e roteiro:
 

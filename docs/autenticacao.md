@@ -7,8 +7,15 @@ procedimentos que o README não detalha (superuser, listagem de usuários, troca
 de senha e criação de usuário fora do seed).
 
 > **Escopo:** cobre o serviço `api` (Django REST Framework, porta **8000**).
-> O microsserviço `inventory` (FastAPI, porta 8001) **não tem autenticação** —
-> nenhuma das rotas abaixo se aplica a ele.
+> O microsserviço `inventory` (FastAPI, porta 8001) **não tem autenticação
+> própria** — nenhuma das rotas abaixo se aplica ao FastAPI direto.
+>
+> No MVP, a porta 8001 fica publicada somente em `127.0.0.1` e o caminho
+> suportado para o inventário é o proxy admin-only do Django:
+> `GET/POST/PATCH/DELETE /api/v1/inventario/` exige o mesmo JWT e o papel
+> `admin` descritos neste guia. A UI fica em `/app/inventario/`. Se a porta
+> 8001 for exposta além do localhost, a API direta do FastAPI continua
+> pública; não a exponha sem uma camada de autenticação.
 
 ---
 

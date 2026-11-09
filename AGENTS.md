@@ -22,7 +22,7 @@ infraestrutura de aulas futuras. A meta-spec completa está em
 docker compose up -d --build          # ambiente completo (api :8000, inventory :8001, dashboard :8501)
 docker compose run --rm tests         # suíte pytest com gate de cobertura (85%)
 docker compose exec api python api/manage.py seed_auth   # usuários demo
-docker compose exec api python api/manage.py seed_demo   # catálogo/pedidos/pagamentos demo
+docker compose exec api python api/manage.py seed_demo --com-inventario  # catálogo/pedidos/pagamentos + inventory 10-30
 docker compose exec api python api/manage.py indexar_docs # índice RAG (README + OpenAPI)
 docker compose run --rm dashboard python -m dashboard.simular_sqli  # simulação SQLi
 python scripts/validar_compose.py     # smoke de db/api/dashboard (stack já no ar)
@@ -36,8 +36,11 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 ## Estrutura
 
 - `api/` — Django (app `core`, mensageria, LLM, RAG em `core/ask_docs/`,
-  commands, migrations, mock de front-end em `templates/core/app.html`)
-- `services/inventory/` — FastAPI + SQLAlchemy/Alembic
+  commands, migrations, mock de front-end em `templates/core/app.html`,
+  página admin-only em `templates/core/inventario.html` e proxy do inventory
+  em `core/inventory_proxy.py`)
+- `services/inventory/` — FastAPI + SQLAlchemy/Alembic (porta 8001 publicada
+  só em `127.0.0.1`; UI oficial via `/app/inventario/`)
 - `dashboard/` — Streamlit (conexão segura, consultas parametrizadas, painel analítico)
 - `tests/` — `unit/` e `integration/` (pytest + pytest-django)
 - `specs/` — specs incrementais por aula (fonte de requisitos)
@@ -70,7 +73,7 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 
 ## Validação obrigatória antes de entregar
 
-1. `docker compose run --rm tests` verde (553+ testes, cobertura >= 85%).
+1. `docker compose run --rm tests` verde (578+ testes, cobertura >= 85%).
 2. `ruff check .` sem erros.
 3. `mypy api services dashboard` verde (config em `pyproject.toml`, stubs em
    `requirements-dev.txt`; o CI roda o mesmo comando).

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: SynapseShop API
-  version: 1.25.1
+  version: 1.26.0
   description: |
     Documentação OpenAPI do MVP SynapseShop (Aula 25).
 
@@ -14,6 +14,12 @@ info:
     um `SELECT` validado e executado em transação read-only. A Aula 24
     adicionou o assistente de documentação (`POST /api/v1/ask_docs/`): RAG
     sobre `README.md` e este OpenAPI, com citação obrigatória das fontes.
+
+    A Aula 25 (complemento) adicionou a página admin-only
+    `/app/inventario/` e o proxy `/api/v1/inventario/`: o Django valida o
+    JWT/papel `admin` e encaminha listagem/criação/edição/exclusão ao FastAPI
+    (`/api/v1/inventory`, local-only em `:8001`). O navegador não fala com o
+    FastAPI, portanto não há CORS.
 
     ## Convenções de contrato
 
@@ -82,6 +88,8 @@ tags:
     description: Assistente de documentação via RAG com citação de fontes (admin)
   - name: inventory
     description: Microsserviço de estoque (FastAPI)
+  - name: inventario
+    description: Proxy admin-only do inventário FastAPI (Django)
 
 paths:
   /health:
@@ -1386,6 +1394,177 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/v1/inventario/:
+    get:
+      operationId: listarInventarioAdmin
+      summary: Listar itens de estoque via proxy admin
+      description: |
+        Proxy admin-only do Django para `GET /api/v1/inventory` do FastAPI.
+        Exige `Authorization: Bearer <JWT>` de um usuário do grupo `admin`.
+        O navegador não acessa a porta 8001; o Django encaminha a chamada pela
+        rede interna do Compose e preserva o envelope do microsserviço.
+      tags:
+        - inventario
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Lista de itens de estoque
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventarioListaResposta"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/InventarioBadGateway"
+        "503":
+          $ref: "#/components/responses/InventarioServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/InventarioTimeout"
+    post:
+      operationId: criarItemInventarioAdmin
+      summary: Criar item de estoque via proxy admin
+      description: |
+        Encaminha o payload ao `POST /api/v1/inventory` do FastAPI. SKU no
+        formato `^[A-Z]{2,4}-[A-Z0-9-]+$`; duplicidade retorna `409`.
+      tags:
+        - inventario
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryItemCreate"
+            example:
+              sku: APL-IP15-128
+              name: iPhone 15 128GB
+              quantity: 10
+              reserved: 0
+              reorder_level: 5
+      responses:
+        "201":
+          description: Item de estoque criado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventarioItemResposta"
+        "400":
+          $ref: "#/components/responses/InventarioBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/InventarioConflict"
+        "502":
+          $ref: "#/components/responses/InventarioBadGateway"
+        "503":
+          $ref: "#/components/responses/InventarioServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/InventarioTimeout"
+
+  /api/v1/inventario/{sku}/:
+    parameters:
+      - $ref: "#/components/parameters/SkuPath"
+    get:
+      operationId: obterItemInventarioAdmin
+      summary: Obter item de estoque via proxy admin
+      description: Encaminha a consulta ao FastAPI e devolve o envelope original.
+      tags:
+        - inventario
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Item de estoque encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventarioItemResposta"
+        "400":
+          $ref: "#/components/responses/InventarioBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InventarioNotFound"
+        "502":
+          $ref: "#/components/responses/InventarioBadGateway"
+        "503":
+          $ref: "#/components/responses/InventarioServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/InventarioTimeout"
+    patch:
+      operationId: atualizarItemInventarioAdmin
+      summary: Atualizar item de estoque via proxy admin
+      description: |
+        Atualiza parcialmente nome, quantidade, reserva ou nível de reposição.
+        O SKU é a chave e não pode ser alterado.
+      tags:
+        - inventario
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryItemUpdate"
+            example:
+              quantity: 8
+      responses:
+        "200":
+          description: Item de estoque atualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventarioItemResposta"
+        "400":
+          $ref: "#/components/responses/InventarioBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InventarioNotFound"
+        "502":
+          $ref: "#/components/responses/InventarioBadGateway"
+        "503":
+          $ref: "#/components/responses/InventarioServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/InventarioTimeout"
+    delete:
+      operationId: removerItemInventarioAdmin
+      summary: Remover item de estoque via proxy admin
+      description: Encaminha a exclusão ao FastAPI e devolve `204` sem corpo.
+      tags:
+        - inventario
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Item de estoque removido
+        "400":
+          $ref: "#/components/responses/InventarioBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/InventarioNotFound"
+        "502":
+          $ref: "#/components/responses/InventarioBadGateway"
+        "503":
+          $ref: "#/components/responses/InventarioServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/InventarioTimeout"
 
 components:
   securitySchemes:
@@ -2808,6 +2987,66 @@ components:
             title: Bad Gateway
             status: 502
             detail: O provedor de IA devolveu uma resposta inválida.
+    InventarioBadRequest:
+      description: Payload, SKU ou parâmetro inválido no microsserviço.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiResponse"
+          example:
+            status: error
+            data: null
+            message: Payload ou parâmetro inválido
+    InventarioNotFound:
+      description: SKU inexistente no inventário.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiResponse"
+          example:
+            status: error
+            data: null
+            message: Item de inventário não encontrado
+    InventarioConflict:
+      description: SKU já cadastrado no inventário.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiResponse"
+          example:
+            status: error
+            data: null
+            message: SKU já cadastrado
+    InventarioBadGateway:
+      description: O microsserviço de inventário devolveu uma resposta inválida.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiResponse"
+          example:
+            status: error
+            data: null
+            message: O microsserviço de inventário devolveu uma resposta inválida.
+    InventarioServiceUnavailable:
+      description: Microsserviço de inventário indisponível.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiResponse"
+          example:
+            status: error
+            data: null
+            message: Microsserviço de inventário indisponível.
+    InventarioTimeout:
+      description: Tempo esgotado ao consultar o microsserviço de inventário.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiResponse"
+          example:
+            status: error
+            data: null
+            message: Tempo esgotado ao consultar o microsserviço de inventário.
     InternalServerError:
       description: Configuração inválida no servidor (camada de IA).
       content:

@@ -5,6 +5,51 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.26.1] - 2026-11-09 — Refresh pós-login e inventário demo populado
+
+### Adicionado
+- **`seed_demo --com-inventario`:** flag opcional que, após criar catálogo/pedidos/pagamentos, cria ou atualiza um item de inventário para cada produto ativo do catálogo. A quantidade é determinística entre **10 e 30** por SKU (`sha256`), com `reserved=0` e `reorder_level=5`; SKU existente recebe `PATCH`, novo recebe `POST`. O caminho padrão do `seed_demo` continua sem rede e sem tocar no FastAPI.
+- **Resumo do seed:** quando a flag é usada, o comando informa quantos itens foram criados/atualizados no inventário; `--silent` continua sem imprimir nada.
+- **Testes:** cobertura do refresh pós-login, da quantidade determinística, do seed completo, do upsert `409 → PATCH`, do caso sem flag e das falhas de conexão/timeout do inventory. A suíte fecha em **578 testes**.
+
+### Alterado
+- **`/app/` após login:** `entrar` chama `recarregarDadosAutenticados()`, que recarrega categorias, catálogo, pedidos e métricas. Os botões de **Editar/Excluir** e o link do inventário aparecem sem F5. A recarga fica fora do `try/catch` de autenticação, então uma falha de catálogo não desloga o usuário.
+- **`/app/` após logout:** `sair` recarrega o catálogo para remover imediatamente os controles de admin.
+- **Documentação:** `README.md`, `docs/curso/guia_apresentação.md`, `docs/apresentacao/roteiro-demo.md`, `docs/aulas/05-inventory.md` e `AGENTS.md` passam a usar `seed_demo --com-inventario` na preparação da demo e explicam o refresh sem F5.
+
+### Validação
+- **Gate:** **578 testes**, cobertura **90,16%**, `ruff check .` e `mypy api services dashboard` verdes.
+- **Seed real:** primeira execução criou 14 itens (catálogo atual), todos com quantidade entre 10 e 30; segunda execução atualizou os mesmos 14, sem duplicar.
+- **Smoke:** `validar_mvp.py` em **13/13** e `--skip-ai` com exit code **0**; `validar_compose.py` **5/5**.
+- **OpenAPI:** sem novas rotas HTTP, permanece em `1.26.0`; o Spectral segue em **0 issues**.
+
+## [1.26.0] - 2026-11-09 — Inventário FastAPI admin-only no `/app/`
+
+### Adicionado
+- **Página `GET /app/inventario/`:** mock de CRUD do inventário servido pelo Django, same-origin, com HTML/CSS/JS inline. Lista, cria, edita e exclui itens de `inventory_items`; o formulário usa `textContent`/DOM, sem `innerHTML` nem CDN. O link **Inventário FastAPI** aparece na seção **Operação** do `/app/` apenas para o papel `admin` e abre na mesma aba para preservar o `sessionStorage`.
+- **Proxy admin-only `/api/v1/inventario/`:** `GET`/`POST` na coleção e `GET`/`PATCH`/`DELETE` por SKU, todos com `IsAdminRole`. O Django valida o JWT e encaminha para o FastAPI pela rede interna (`http://inventory:8001/api/v1/inventory`) com `httpx`; o envelope e os status `201/204/400/404/409` são preservados. Timeout vira `504`, serviço fora vira `503` e resposta inválida vira `502`. O `Authorization` do navegador não é repassado ao microsserviço.
+- **Página com refresh de JWT:** o access de 5 minutos é renovado com `synapse.refresh` em um `401`, como no `/app/`; sem token/papel admin, a página mostra “acesso restrito” e não carrega dados.
+- **Smoke:** novo passo “Inventário admin via proxy” (admin `200`, `demo_user` `403`); o `validar_mvp.py` passa a executar **13 passos**.
+- **Testes:** `tests/integration/test_inventory_proxy.py` cobre permissões, forwarding, erros e indisponibilidade; `tests/integration/test_app_frontend.py` cobre a página e o link admin-only. A suíte fecha em **571 testes**.
+
+### Alterado
+- **`requirements.txt`:** `httpx>=0.28,<1.0` para o proxy de runtime.
+- **`api/config/settings.py`, `.env.example` e `docker-compose.yml`:** `INVENTORY_URL` (padrão `http://inventory:8001`) e `INVENTORY_TIMEOUT_SEGUNDOS`; variável injetada no serviço `api`.
+- **`docker-compose.yml`:** a porta do inventory passa a ser publicada somente em `127.0.0.1:8001:8001`, mantendo Swagger/healthcheck local e fechando o acesso pela rede.
+- **`docs/openapi.yaml`:** versão `1.26.0`, tag `inventario` e paths `/api/v1/inventario/` e `/api/v1/inventario/{sku}/` com `bearerAuth`, respostas `401/403/404/409/502/503/504` e o envelope do microsserviço.
+- **`README.md`, `docs/aulas/05-inventory.md`, `docs/autenticacao.md`, `docs/integrador.md`, `docs/curso/guia_apresentação.md` e `docs/apresentacao/roteiro-demo.md`:** documentam a página, o proxy, o vínculo com `demo_admin`, o passo de demo e a restrição local-only do FastAPI direto.
+- **`AGENTS.md` e `PROMPTS.md`:** registram a nova arquitetura, comandos e validação.
+
+### Segurança e limites
+- **Proteção real no servidor:** o link escondido é apenas UX; o proxy responde `401` para anônimo e `403` para o papel `user`, independentemente do que o JavaScript exiba.
+- **Sem CORS:** o navegador fala somente com o Django; o FastAPI não recebe `Origin` do navegador.
+- **HTML é um shell público:** sem admin, `/app/inventario/` não carrega dados nem executa ações, mas o HTML em si não retorna `403`. Bloquear o próprio HTML exigiria cookie/sessão server-side (hardening separado).
+- **FastAPI direto:** continua sem autenticação própria; no Compose, a porta 8001 fica restrita a `127.0.0.1`. Não exponha essa porta à rede sem uma camada de autenticação.
+
+### Validação
+- **Gate:** **571 testes**, cobertura **90,16%**, `ruff check .` e `mypy api services dashboard` verdes; `validar_mvp.py` em **13/13** e `--skip-ai` com exit code **0**; Compose **5/5**; OpenAPI validado pelo Spectral.
+- **CRUD real:** criação, edição, duplicidade (`409`) e exclusão (`204`) exercitados pela página e pelos testes do proxy; o navegador não acessa a porta 8001.
+
 ## [1.25.1] - 2026-11-08 — Fallback automático Gemini → mock
 
 ### Adicionado
@@ -19,15 +64,16 @@ codifica retroativamente o histórico das aulas anteriores.
 - **`api/config/settings.py`, `.env.example` e `docker-compose.yml`:** default `auto`, timeout de 30 s no exemplo real e `LLM_MAX_TENTATIVAS=2` para reduzir a espera antes do fallback; o serviço `tests` continua fixando `mock`.
 - **`api/core/llm/gemini.py`:** 404 vira `LlmModeloIndisponivel`; bloqueio de segurança vira `RespostaBloqueada`; resposta vazia continua `RespostaInvalida`.
 - **`api/core/llm/servico.py`:** resolução de `auto`, fallback task-specific e `modelos_efetivos` coerente com a chave.
-- **`api/core/views.py`:** novos campos de métricas mantendo `provedor` e `modelo` por compatibilidade.
-- **`api/core/templates/core/app.html` e testes do front-end:** filtro `is_active` no catálogo, `AbortController`/timeout no refresh do JWT e aviso explícito de DLQ no pagamento.
+- **`api/core/views.py`:** novos campos de métricas mantendo `provedor` e `modelo` por compatibilidade; a repetição de pagamento agora consulta o pagamento existente antes do `INSERT`, evitando o `ERROR duplicate key` no caminho normal e mantendo a constraint para a corrida.
+- **`api/core/templates/core/app.html`:** o pagamento distingue **201** (novo), **200** (idempotente/republicado) e **409** (outro pagamento), com painel de idempotência e exibição da chave/repetição.
+- **`api/core/templates/core/app.html` e testes do front-end:** filtro `is_active` no catálogo, `AbortController`/timeout no refresh do JWT, aviso explícito de DLQ no pagamento, `semApi` para o cartão de saúde usar `GET /health` em vez de `/api/v1/health` e renderização de `rows` como objetos no Texto-para-SQL.
 - **`docs/openapi.yaml`:** versão `1.25.1` e schema `LlmMetrics` com os campos de fallback.
 - **`docs/aulas/25-ia-real-gemini.md`, `README.md`, `docs/apresentacao/roteiro-demo.md`, `docs/apresentacao/checklist-mvp.md`, `AGENTS.md` e `PROMPTS.md`:** documentam `auto`, fallback, modos estritos e diagnóstico.
 
 ### Notas
 - **Latência:** como o fallback ocorre depois de retry/breaker, o exemplo usa `LLM_MAX_TENTATIVAS=2`; com timeout de 30 s e 3 tentativas, a primeira resposta pode demorar.
 - **Validação real:** a chave do `.env` respondeu com `gemini-3.5-flash` (20 tokens de entrada/1 de saída); `auto` respondeu 200 nos três endpoints; um modelo inexistente disparou fallback para o mock com `fallbacks=1`, `provedor_efetivo=mock` e `fallback_ativo=true`.
-- **Gate:** **553 testes**, cobertura **90,21%**, `ruff check .` e `mypy api services dashboard` verdes; nenhum teste automatizado depende de rede ou da chave real.
+- **Gate:** **557 testes**, cobertura **90,28%**, `ruff check .` e `mypy api services dashboard` verdes; nenhum teste automatizado depende de rede ou da chave real.
 
 ## [1.25.0] - 2026-11-08 — Fechamento do MVP, Demo e IA Real (Gemini)
 

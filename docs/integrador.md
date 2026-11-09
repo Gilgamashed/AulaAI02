@@ -13,10 +13,13 @@ por `scripts/lint-openapi.ps1` (Spectral, 0 erros/avisos).
 | Ambiente | URL                                      | Documentação interativa        |
 | -------- | ---------------------------------------- | ------------------------------ |
 | API (DRF) | `http://localhost:8000`                 | `/docs/` (Swagger UI), `/redoc/` (ReDoc), `/docs/openapi.yaml` |
-| Inventory (FastAPI) | `http://localhost:8001`        | `/docs` (nativo do FastAPI)    |
+| Inventory (FastAPI) | `http://127.0.0.1:8001` (local-only) | `/docs` (nativo do FastAPI) |
+| Inventário admin (proxy DRF) | `http://localhost:8000/api/v1/inventario/` | `/app/inventario/` (UI admin-only) |
 
 Verificação rápida: `GET /health` na API e no inventory devolvem
-`{"status": "ok", ...}`.
+`{"status": "ok", ...}`. A porta 8001 é publicada apenas em `127.0.0.1`;
+o integrador deve usar o proxy `/api/v1/inventario/` com JWT e papel `admin`.
+O FastAPI direto continua sem autenticação — não o exponha à rede.
 
 ### Autenticação (JWT)
 
