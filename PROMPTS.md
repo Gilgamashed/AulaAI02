@@ -692,3 +692,19 @@ executada (registrar apenas usos reais durante o desenvolvimento).
   - **Erros claros:** timeout e indisponibilidade do FastAPI viram `CommandError` com instrução para subir o container; o catálogo/pedidos já criados permanecem e o comando pode ser repetido.
 - **Resultado/Decisão:** atualizados `api/core/templates/core/app.html`, `api/core/management/commands/seed_demo.py`, `tests/integration/test_app_frontend.py` e `tests/unit/test_seed_demo.py`; documentação em `README.md`, `docs/curso/guia_apresentação.md`, `docs/apresentacao/roteiro-demo.md`, `docs/aulas/05-inventory.md`, `docs/CHANGELOG.md` (1.26.1) e `AGENTS.md`.
 - **Validação:** **578 testes**, cobertura **90,16%**, `ruff check .` e `mypy api services dashboard` verdes; `seed_demo --com-inventario` criou 14 itens (catálogo atual) entre 10 e 30 unidades e a segunda execução atualizou os mesmos 14 sem duplicar; smoke **13/13** e `--skip-ai` com exit code **0**; Compose **5/5**; OpenAPI sem mudanças, Spectral **0 issues**.
+
+## [2026-11-16] Fase 2 — Governança SpecDD, specs de IA e evidências
+
+- **Ferramenta:** opencode (DeepSeek V4.1 Flash).
+- **Contexto:** encerramento da fase 1 (tag `apresentacao-final`) e início da fase de portfólio, motivada por `docs/portfolio/preparacao`: transformar o MVP em peça de entrevista e investigar por que perguntas livres de usuário falham nos três pilares de IA.
+- **Prompt do usuário (resumo):** “vamos analisar o doc `docs/portfolio/preparacao` e nos preparar para entrar nessa nova fase de desenvolvimento”; criar `specs02/` com nova diretriz incremental SpecDD adaptada; depois: “vamos executar o plano, vamos deixar o pipeline para um ajuste futuro”.
+- **Decisões de arquitetura e escopo:**
+  - **Fase 1 congelada:** o snapshot pós-apresentação foi salvo no branch `snapshot/apresentacao-final` e na tag `apresentacao-final` (`c77eb47`); `dev` avançou por fast-forward e a fase 2 vive em `fase2/desenvolvimento`.
+  - **`specs02/` substitui formalmente `specs/`:** `specs/` fica como histórico do curso; a fonte ativa é `specs02/<numero>_fase2_spec_*.md`, governada por uma meta-spec própria em 12 seções.
+  - **Dois incrementos de IA:** `01` mede (golden set de 46+ perguntas + harness + baseline) e `02` corrige (validação por AST, reparo com feedback, JSONB/data e paridade do mock). Separar medição de correção evita otimizar no escuro e produz evidência antes/depois.
+  - **Diagnóstico registrado na spec `01`:** o validador por regex rejeita SQL válido (`EXTRACT(... FROM ...)`, `jsonb_array_elements`, `SELECT *`, aspas e aliases como `owner`); não há loop de reparo; o schema do prompt não documenta a estrutura de `core_pedido.itens`; o RAG é lexical sobre README + OpenAPI; o `/assist` não consulta dados.
+  - **Evidência como cidadã de primeira classe:** `docs/portfolio/evidencias/` define estrutura (`ia/`, `deploy/`, `performance/`, `seguranca/`, `capturas/`), nomes por data, limite de 5 MB e proibição de segredos/PII.
+  - **Pipeline adiado:** o branch `fase2/desenvolvimento` não foi adicionado aos gatilhos do GitHub Actions; a decisão é tratada em ajuste futuro.
+  - **Sem antecipação:** RAG v2, deploy, observabilidade, hardening e tool calling ficaram no backlog P0/P1/P2, sem código nesta etapa.
+- **Resultado/Decisão:** criados `specs02/README.md`, `specs02/00_diretriz_incremental_specdd_fase2.md`, `specs02/_template_fase2_spec.md`, `specs02/01_fase2_spec_avaliacao-ia.md`, `specs02/02_fase2_spec_texto-para-sql-v2.md`, `docs/portfolio/evidencias/README.md` e `.gitkeep` das cinco subpastas; atualizados `AGENTS.md`, `specs/README.md`, `README.md` e `docs/CHANGELOG.md` (1.27.0).
+- **Validação:** links relativos dos documentos verificados (0 quebrados); nenhuma mudança de código de produto; baseline da fase 1 preservado (578 testes, cobertura 90,16%, `ruff`/`mypy` verdes); `docs/openapi.yaml` permanece 1.26.0.

@@ -5,6 +5,39 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.27.0] - 2026-11-16 — Fase 2: governança SpecDD e specs de IA
+
+### Adicionado
+- **`specs02/`:** novo diretório de especificações da fase 2 (portfólio), com
+  [`README.md`](../specs02/README.md) contendo incrementos e backlog priorizado
+  P0/P1/P2, meta-spec própria e template de spec.
+- **Meta-spec da fase 2:** `specs02/00_diretriz_incremental_specdd_fase2.md`
+  congela a fase 1 na tag `apresentacao-final`, mantém a regra de escopo
+  fechado e define fluxo, formato de spec, não-regressão, política de
+  evidências, política de IA/custo, priorização e DoD global.
+- **Spec `01_fase2_spec_avaliacao-ia.md`:** golden set de 46+ perguntas,
+  harness `scripts/avaliar_ia.py` e baseline mensurável dos três pilares de IA.
+- **Spec `02_fase2_spec_texto-para-sql-v2.md`:** validação por AST,
+  reparo com feedback, cobertura de JSONB/data e paridade do mock, com meta de
+  90% (Gemini) e 80% (mock) no golden set.
+- **`docs/portfolio/evidencias/`:** convenção de evidências da fase 2
+  (estrutura, nomes, limites de tamanho, proibição de segredos/PII) e pasta de
+  origem da fase, `docs/portfolio/preparacao`.
+
+### Alterado
+- **`AGENTS.md`:** regra de escopo passa a apontar para
+  `specs02/<numero>_fase2_spec_*.md`; `specs/` fica marcado como histórico.
+- **`specs/README.md`:** banner de fase 1 encerrada, com link para `specs02/`.
+- **`README.md`:** índice de documentação separa specs históricas (fase 1) das
+  ativas (fase 2).
+
+### Validação
+- Nenhuma mudança de código de produto; o baseline da fase 1 permanece
+  **578 testes**, cobertura **90,16%**, `ruff check .` e
+  `mypy api services dashboard` verdes.
+- Links relativos dos novos documentos verificados.
+- `docs/openapi.yaml` inalterado em **1.26.0** (nenhuma rota nova).
+
 ## [1.26.1] - 2026-11-09 — Refresh pós-login e inventário demo populado
 
 ### Adicionado

@@ -1,5 +1,9 @@
 # Specs — SpecDD do SynapseShop
 
+> **Fase 1 encerrada.** Estas specs são o histórico do curso, congelado na tag
+> `apresentacao-final`. O desenvolvimento ativo está em
+> [`specs02/`](../specs02/README.md).
+
 Índice das especificações incrementais (metodologia SpecDD). Cada aula tem sua
 spec; a implementação deve satisfazer apenas a spec da aula corrente (ver
 `00_diretriz_incremental_specdd.md`).

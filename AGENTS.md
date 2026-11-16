@@ -11,10 +11,12 @@ Docker Compose.
 
 ## Regra de escopo (anti-hallucination)
 
-Implemente **apenas** o que a spec da aula corrente pede
-(`specs/specs_da_aula_N.md`). Não antecipe modelos, endpoints, libs ou
-infraestrutura de aulas futuras. A meta-spec completa está em
-`specs/00_diretriz_incremental_specdd.md`.
+A fase 1 (curso de 25 aulas) está encerrada e congelada na tag
+`apresentacao-final`; suas specs em `specs/` são histórico. Implemente
+**apenas** o que a spec do incremento ativo pede
+(`specs02/<numero>_fase2_spec_*.md`). Não antecipe modelos, endpoints, libs ou
+infraestrutura de incrementos futuros. A meta-spec da fase ativa está em
+`specs02/00_diretriz_incremental_specdd_fase2.md`.
 
 ## Comandos
 
@@ -43,7 +45,9 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
   só em `127.0.0.1`; UI oficial via `/app/inventario/`)
 - `dashboard/` — Streamlit (conexão segura, consultas parametrizadas, painel analítico)
 - `tests/` — `unit/` e `integration/` (pytest + pytest-django)
-- `specs/` — specs incrementais por aula (fonte de requisitos)
+- `specs02/` — fase 2 (portfólio): meta-spec, backlog e specs ativas
+- `specs/` — histórico da fase 1 (curso), congelado na tag `apresentacao-final`
+- `docs/portfolio/` — documento de preparação e evidências da fase 2
 - `docs/` — autenticação, contratos de evento, OpenAPI, changelog, aulas e
   material de apresentação
 - `scripts/` — medições de cache/mensageria, lint do OpenAPI, smoke do Compose
@@ -67,6 +71,8 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
   `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`; nunca versione os valores.
 - Toda decisão relevante fica registrada: specs, `README.md`,
   `docs/CHANGELOG.md` e `PROMPTS.md` (uso de IA).
+- Fase 2: todo incremento concluído deixa evidência em
+  `docs/portfolio/evidencias/` e status atualizado em `specs02/README.md`.
 - Contratos: eventos em `docs/contracts/` + `api/core/messaging/contracts.py`;
   HTTP em `docs/openapi.yaml` — atualize-os junto com o código.
 - Rotas Django terminam em `/` (ex.: `/api/v1/assist/`).

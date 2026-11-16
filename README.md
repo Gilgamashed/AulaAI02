@@ -268,7 +268,8 @@ mantém o estado atual do projeto e o índice para navegação.
 - [Autenticação: tutorial operacional](docs/autenticacao.md) (login, usuários, admin)
 - [Contrato OpenAPI](docs/openapi.yaml) — Swagger UI em `/docs/`, ReDoc em `/redoc/`
 - [Contratos de evento](docs/contracts/)
-- [Specs por aula (SpecDD)](specs/README.md)
+- [Specs da fase 1 (histórico)](specs/README.md)
+- [Specs da fase 2 — portfólio (ativas)](specs02/README.md)
 - [Visão geral do curso](docs/curso/visao-geral.md)
 - [PROMPTS.md](PROMPTS.md) — histórico de uso de IA (entrega obrigatória)
 
@@ -922,4 +923,5 @@ Evidências e roteiro:
 
 - [Histórico de uso de IA generativa](PROMPTS.md)
 - [Histórico de alterações](docs/CHANGELOG.md)
-- [Diretriz SpecDD](specs/00_diretriz_incremental_specdd.md)
+- [Diretriz SpecDD da fase 2](specs02/00_diretriz_incremental_specdd_fase2.md)
+- [Diretriz SpecDD da fase 1 (histórico)](specs/00_diretriz_incremental_specdd.md)
