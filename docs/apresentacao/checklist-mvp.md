@@ -48,10 +48,10 @@ docker compose up -d --build
 
 # 2. Usuários, massa demo e índice RAG
 docker compose exec api python api/manage.py seed_auth
-docker compose exec api python api/manage.py seed_demo
+docker compose exec api python api/manage.py seed_demo --com-inventario
 docker compose exec api python api/manage.py indexar_docs
 
-# 3. Smoke ponta a ponta (12 passos)
+# 3. Smoke ponta a ponta (13 passos)
 python scripts/validar_mvp.py
 
 # 4. Sem os passos de IA (marcados como SKIP)

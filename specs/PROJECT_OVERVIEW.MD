@@ -44,7 +44,7 @@ A infraestrutura do sistema é projetada em 6 camadas lógicas, conteinerizadas 
 O projeto só é considerado concluído quando atende aos seguintes critérios arquiteturais e funcionais:
 * Sobe por completo utilizando um único comando (`docker-compose up`)[cite: 1].
 * Autenticação JWT funcional com pelo menos dois papéis de usuário distintos[cite: 1].
-* Fluxo ponta a ponta estruturado: `Pedido` ➔ `Pagamento` ➔ `Notificação`, operando com mensageria assíncrona, idempotência e DLQ[cite: 1].
+* Fluxo ponta a ponta estruturado: `Pedido` ➔ `Pagamento` ➔ `Notificação`, operando com mensageria assíncrona, idempotência e DLQ[cite: 1]
 * Cobertura de testes automatizados dentro da meta estipulada pela turma[cite: 1].
 * Documentação OpenAPI/Swagger publicada e coleções Postman/Insomnia disponíveis[cite: 1].
 * Pelo menos uma funcionalidade de IA operacional (assistente, texto-para-SQL ou RAG)[cite: 1].

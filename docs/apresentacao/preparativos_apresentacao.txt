@@ -1,0 +1,58 @@
+Chegamos a ultima aula do curso. Precisamos verificar se tudo está conforme o DoD do curso e se tudo está ok para apresentação final.
+
+1 - MVP
+•	Cadastro e listagem de produtos, com cache no catálogo(Com cache assim evitamos sobrecarregar o Banco de Dados).
+•	Criação de pedidos, com publicação de evento PedidoCriado.
+•	Processamento assíncrono de pagamento e notificação via fila de mensagens, com idempotência e fila de mensagens mortas (DLQ).
+•	Autenticação JWT com papéis de administrador e cliente.
+•	Assistente de suporte via IA, com engenharia de prompt aplicada.
+•	Consulta de dados de negócio em linguagem natural (texto-para-SQL).
+•	Assistente de dúvidas baseado na documentação do projeto (RAG), com citação de fontes.
+•	Dashboards de vendas e de desempenho da API.
+•	Suíte de testes automatizados e documentação completa da API.
+•	Pipeline de integração e entrega contínua (CI/CD).
+
+2 - Tarefas para agente
+• Verificar se o projeto atende as necessidades do MVP
+• Preparar um mock de front-end simples para auxilio na apresentação do MVP
+• Verificar as funcionalidades IA do sistema e considerar os requisitos para mudar o mock para um IA funcional simples do gemini. (API KEY presente no .env)
+
+3 - Considerações com segurança
+• Verificar potenciais brechas
+• Averiguar segurança das keys
+
+
+## Perguntas
+
+1 - login
+. tempo de throtling para login
+. como simular tentativas de sql injection para provar resiliciena do sistema de Autenticação
+. instruções de como entrar como demo-admin para que endpoints como 'http://localhost:8000/api/v1/cache/metrics/' não resultem em 401 (atualmente, logar no 'localhost:8000/app/' como 'demo-admin' resulta em 401)
+
+2 - catálogo
+. exemplos de produto para cadastrar ao vivo.
+
+3 - pedidos
+. informações sobre DLQ
+. como o KAFKA atua nesse serviço
+
+4 - Pagamentos e notificação
+. o sistema de notificação por email/sms/push funcional ou apenas mock?
+. Como (e qual) o worker funciona nesse serviço
+. explicar o polling
+
+5 - IA
+. explicar o que são 'summarize' e 'explain'
+. explicar parametros presentes no front-end (ex: presetados '0,2' e '256')
+. explicar o que é redação de PII antes do provedor e como timeout retry e circuit breaker funcionam
+. minhas consultas 'Texto-para-SQL' resultam em [object Object]; isso é erro do prompt ou do provedor IA?
+. perguntas fora do contexto sql resultam em timeout sem chance para 422 - isso é ok ou devemos ajustar?
+. documentação: resposta para 'Como rodar os testes?' : 'O job publica `reports/junit.xml`, `reports/coverage.xml` e `htmlcov/` como artefatos (`relatorios-testes`, retenção de 7 dias), mesmo quando a suíte falha. [1]' - Resposta OK ou precisamos de ajustes?
+. TEXT to SQL funciona OK no 'http://localhost:8501/Consulta_em_Linguagem_Natural'
+
+6 - Dashboards
+. Qual grafico está sendo usado para a 'receita por dia'? Não seria melhor usar um grafico de barras?
+
+7 - CI/CD
+. elabore a respeito da pipeline, do cache e das camadas docker
+

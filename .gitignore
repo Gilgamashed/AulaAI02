@@ -48,6 +48,9 @@ data/*.sqlite3
 data/*.sqlite3-*
 data/*.db
 
+# Material binário de apresentação (mantido apenas local)
+docs/apresentacao/*.docx
+
 # Sistema operacional
 .DS_Store
 Thumbs.db

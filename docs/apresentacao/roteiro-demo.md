@@ -1,12 +1,13 @@
 # Roteiro da demonstração — SynapseShop
 
 Roteiro para conduzir a apresentação final sem consultar o código. Tempo total
-estimado: **18 a 22 minutos**, com margem para perguntas.
+estimado: **20 a 24 minutos**, com margem para perguntas.
 
 ## Pré-requisitos
 
 - Docker Desktop/Engine com Compose v2 e pelo menos 6 GB livres.
-- Portas livres: `8000` (API), `8001` (inventory), `8501` (Streamlit).
+- Portas livres: `8000` (API), `8001` (inventory, publicada só em
+  `127.0.0.1`), `8501` (Streamlit).
 - `.env` local baseado em `.env.example`, com `GEMINI_API_KEY` preenchida
   **somente** se o bloco de IA real for executado.
 - Navegador em `1366×768` ou maior, com zoom em 100%.
@@ -16,7 +17,7 @@ estimado: **18 a 22 minutos**, com margem para perguntas.
 ```bash
 docker compose up -d --build
 docker compose exec api python api/manage.py seed_auth
-docker compose exec api python api/manage.py seed_demo
+docker compose exec api python api/manage.py seed_demo --com-inventario
 docker compose exec api python api/manage.py indexar_docs
 python scripts/validar_mvp.py
 ```
@@ -45,7 +46,8 @@ valores padrão de desenvolvimento estão documentados em
 ### 1. Catálogo e cache (3 min)
 
 1. Abra `http://localhost:8000/app/`.
-2. Faça login como `demo_admin`.
+2. Faça login como `demo_admin`; o catálogo recarrega sozinho e os botões de
+   **Editar/Excluir** aparecem sem F5.
 3. Mostre busca, filtro por categoria e ordenação no catálogo.
 4. Abra `http://localhost:8000/api/v1/cache/metrics/` e mostre o hit rate.
 5. Recarregue o catálogo e mostre `lookups`/`hits` crescendo.
@@ -85,7 +87,29 @@ docker compose logs -f worker-pagamentos
 Reenviar o mesmo POST de pagamento é idempotente (200); outro método/desfecho
 no mesmo pedido retorna 409.
 
-### 4. IA com Gemini e fallback (3 min)
+### 4. Inventário FastAPI admin-only (2 min)
+
+1. Como `demo_admin`, clique em **Inventário FastAPI** na seção **Operação**
+   do `/app/`. A tabela já abre com os produtos do catálogo, cada um com
+   10-30 unidades.
+2. Crie um item extra `INV-DEMO-001` com quantidade `10`, reservado `2` e
+   reposição `3`.
+3. Edite a quantidade para `7`; tente duplicar o SKU e mostre `409`; exclua e
+   mostre `204`.
+4. Deixe `docker compose logs -f inventory` visível para provar que o CRUD é
+   executado pelo FastAPI.
+5. Saia e entre como `demo_user`: o link não aparece. Abra
+   `http://localhost:8000/app/inventario/` diretamente e mostre “acesso
+   restrito”; o proxy responde `403`.
+
+**Plano B:** se o inventory estiver fora, a página mostra `503` e o proxy não
+expõe a URL interna. Verifique `docker compose ps` e os logs do container
+`inventory`.
+
+**Antes do bloco de IA:** saia de `demo_user` e entre novamente como
+`demo_admin`; as abas SQL e Documentação são admin-only.
+
+### 5. IA com Gemini e fallback (3 min)
 
 1. Confirme no `.env`:
 
@@ -114,7 +138,7 @@ cota estourar, o mock da tarefa assume após esgotar retry/breaker. Para forçar
 o modo determinístico, use `LLM_PROVIDER=mock`; para diagnóstico estrito, use
 `LLM_PROVIDER=gemini`. Reinicie a API após a troca.
 
-### 5. Dashboards (3 min)
+### 6. Dashboards (3 min)
 
 1. Abra `http://localhost:8501`.
 2. Mostre receita total, ticket médio, receita por dia e os dois rankings de
@@ -125,7 +149,7 @@ o modo determinístico, use `LLM_PROVIDER=mock`; para diagnóstico estrito, use
 `http://localhost:8501/_stcore/health` e os logs do container `dashboard`; as
 mesmas consultas podem ser demonstradas via Swagger/`/docs/`.
 
-### 6. CI/CD (2 min)
+### 7. CI/CD (2 min)
 
 1. Abra a aba **Actions** do repositório e mostre o último run verde.
 2. Destaque os jobs `test-and-lint`, `docker-build`, `compose-smoke` e
