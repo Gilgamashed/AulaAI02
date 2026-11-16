@@ -1,10 +1,10 @@
 {
   "versao_relatorio": 1,
   "metadados": {
-    "iniciado_em": "2026-11-16T22:57:04+00:00",
-    "finalizado_em": "2026-11-16T22:57:18+00:00",
-    "duracao_s": 13.49,
-    "commit": "3b1e5c678731363b87b6da1b6db0d998b7ad1c96",
+    "iniciado_em": "2026-11-16T23:02:07+00:00",
+    "finalizado_em": "2026-11-16T23:02:21+00:00",
+    "duracao_s": 13.9,
+    "commit": "708e1c395576dc57964bf0b6f9b6e198c462214d",
     "base_url": "http://localhost:8000",
     "modo": "mock",
     "usuario": "demo_admin",
@@ -36,10 +36,10 @@
           "sql": "mock-sql",
           "docs": "mock-docs"
         },
-        "chamadas": 0,
-        "tokens_prompt": 0,
-        "tokens_output": 0,
-        "custo_usd": 0.0,
+        "chamadas": 55,
+        "tokens_prompt": 61071,
+        "tokens_output": 1303,
+        "custo_usd": 0.32489999999999997,
         "fallbacks": 0,
         "fallback_ativo": false,
         "ultimo_motivo_fallback": ""
@@ -53,10 +53,10 @@
           "sql": "mock-sql",
           "docs": "mock-docs"
         },
-        "chamadas": 55,
-        "tokens_prompt": 61071,
-        "tokens_output": 1303,
-        "custo_usd": 0.32489999999999997,
+        "chamadas": 110,
+        "tokens_prompt": 122142,
+        "tokens_output": 2606,
+        "custo_usd": 0.6497999999999999,
         "fallbacks": 0,
         "fallback_ativo": false,
         "ultimo_motivo_fallback": ""
@@ -136,9 +136,9 @@
       "resposta_inesperada": 12
     },
     "latencia_ms": {
-      "p50": 72.09,
-      "p95": 1179.91,
-      "max": 1644.56
+      "p50": 89.23,
+      "p95": 1049.34,
+      "max": 1197.65
     },
     "tokens": {
       "prompt": 17760,
@@ -155,10 +155,10 @@
           "sql": "mock-sql",
           "docs": "mock-docs"
         },
-        "chamadas": 0,
-        "tokens_prompt": 0,
-        "tokens_output": 0,
-        "custo_usd": 0.0,
+        "chamadas": 55,
+        "tokens_prompt": 61071,
+        "tokens_output": 1303,
+        "custo_usd": 0.32489999999999997,
         "fallbacks": 0,
         "fallback_ativo": false,
         "ultimo_motivo_fallback": ""
@@ -172,10 +172,10 @@
           "sql": "mock-sql",
           "docs": "mock-docs"
         },
-        "chamadas": 55,
-        "tokens_prompt": 61071,
-        "tokens_output": 1303,
-        "custo_usd": 0.32489999999999997,
+        "chamadas": 110,
+        "tokens_prompt": 122142,
+        "tokens_output": 2606,
+        "custo_usd": 0.6497999999999999,
         "fallbacks": 0,
         "fallback_ativo": false,
         "ultimo_motivo_fallback": ""
@@ -200,7 +200,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=1 linhas=1",
-      "latencia_ms": 102.84,
+      "latencia_ms": 188.9,
       "colunas": [
         "total_pedidos"
       ],
@@ -219,7 +219,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=1 linhas=1",
-      "latencia_ms": 89.79,
+      "latencia_ms": 113.65,
       "colunas": [
         "total_usuarios"
       ],
@@ -238,7 +238,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=2 linhas=4",
-      "latencia_ms": 64.78,
+      "latencia_ms": 122.48,
       "colunas": [
         "status",
         "total_pedidos"
@@ -258,7 +258,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=2 linhas=3",
-      "latencia_ms": 88.5,
+      "latencia_ms": 127.32,
       "colunas": [
         "canal",
         "total_notificacoes"
@@ -278,7 +278,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 68.98,
+      "latencia_ms": 89.24,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -295,7 +295,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 84.24,
+      "latencia_ms": 146.74,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -312,7 +312,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=5 linhas=10",
-      "latencia_ms": 71.28,
+      "latencia_ms": 89.23,
       "colunas": [
         "id",
         "usuario_id",
@@ -335,7 +335,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=7 linhas=3",
-      "latencia_ms": 55.51,
+      "latencia_ms": 88.96,
       "colunas": [
         "id",
         "username",
@@ -360,7 +360,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=6 linhas=10",
-      "latencia_ms": 49.61,
+      "latencia_ms": 74.34,
       "colunas": [
         "id",
         "name",
@@ -384,7 +384,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: id, valor/valor_pago",
-      "latencia_ms": 83.82,
+      "latencia_ms": 116.35,
       "colunas": [
         "metodo",
         "total_pagamentos",
@@ -405,7 +405,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 77.45,
+      "latencia_ms": 81.49,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -422,7 +422,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 72.9,
+      "latencia_ms": 64.26,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -439,7 +439,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=1 linhas=1",
-      "latencia_ms": 60.32,
+      "latencia_ms": 141.86,
       "colunas": [
         "ticket_medio"
       ],
@@ -458,7 +458,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=1 linhas=1",
-      "latencia_ms": 65.61,
+      "latencia_ms": 82.23,
       "colunas": [
         "soma_total"
       ],
@@ -477,7 +477,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=1 linhas=1",
-      "latencia_ms": 76.14,
+      "latencia_ms": 96.38,
       "colunas": [
         "faturamento_aprovado"
       ],
@@ -496,7 +496,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=3 linhas=3",
-      "latencia_ms": 73.9,
+      "latencia_ms": 96.02,
       "colunas": [
         "metodo",
         "total_pagamentos",
@@ -517,7 +517,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=1 linhas=1",
-      "latencia_ms": 164.21,
+      "latencia_ms": 55.67,
       "colunas": [
         "faturamento_aprovado"
       ],
@@ -536,7 +536,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 103.12,
+      "latencia_ms": 52.31,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -553,7 +553,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: total/soma/valor_total",
-      "latencia_ms": 102.64,
+      "latencia_ms": 76.73,
       "colunas": [
         "status",
         "total_pedidos"
@@ -573,7 +573,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: media/preco_medio/avg_price/avg",
-      "latencia_ms": 95.65,
+      "latencia_ms": 100.15,
       "colunas": [
         "id",
         "name",
@@ -597,7 +597,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=1 linhas=1",
-      "latencia_ms": 76.38,
+      "latencia_ms": 188.98,
       "colunas": [
         "soma_total"
       ],
@@ -616,7 +616,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: mes/month, receita/faturamento/total",
-      "latencia_ms": 46.96,
+      "latencia_ms": 70.73,
       "colunas": [
         "faturamento_aprovado"
       ],
@@ -635,7 +635,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: dia/date/data, total/count/pedidos",
-      "latencia_ms": 53.67,
+      "latencia_ms": 254.74,
       "colunas": [
         "total_pedidos"
       ],
@@ -654,7 +654,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: semana/week",
-      "latencia_ms": 65.87,
+      "latencia_ms": 122.93,
       "colunas": [
         "ticket_medio"
       ],
@@ -673,7 +673,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 81.81,
+      "latencia_ms": 104.75,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -690,7 +690,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: mes/month, total/usuarios/count",
-      "latencia_ms": 73.41,
+      "latencia_ms": 109.55,
       "colunas": [
         "total_usuarios"
       ],
@@ -709,7 +709,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=3 linhas=3",
-      "latencia_ms": 56.22,
+      "latencia_ms": 101.3,
       "colunas": [
         "id",
         "username",
@@ -730,7 +730,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: id, username/cliente, total",
-      "latencia_ms": 59.64,
+      "latencia_ms": 88.83,
       "colunas": [
         "soma_total"
       ],
@@ -749,7 +749,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: id, metodo",
-      "latencia_ms": 53.06,
+      "latencia_ms": 82.76,
       "colunas": [
         "status",
         "total_pedidos"
@@ -769,7 +769,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 50.38,
+      "latencia_ms": 78.23,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -786,7 +786,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: username/cliente, receita/total",
-      "latencia_ms": 52.78,
+      "latencia_ms": 86.52,
       "colunas": [
         "faturamento_aprovado"
       ],
@@ -805,7 +805,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=3 linhas=3",
-      "latencia_ms": 61.42,
+      "latencia_ms": 65.11,
       "colunas": [
         "id",
         "username",
@@ -826,7 +826,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 42.49,
+      "latencia_ms": 61.15,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -843,7 +843,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: sku/produto/name, receita/total",
-      "latencia_ms": 51.01,
+      "latencia_ms": 64.39,
       "colunas": [
         "faturamento_aprovado"
       ],
@@ -862,7 +862,7 @@
       "sucesso": false,
       "falha": "resposta_inesperada",
       "detalhe": "colunas ausentes: media/media_itens/avg",
-      "latencia_ms": 52.3,
+      "latencia_ms": 75.78,
       "colunas": [
         "ticket_medio"
       ],
@@ -881,7 +881,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 59.53,
+      "latencia_ms": 60.9,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -898,7 +898,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 59.75,
+      "latencia_ms": 70.1,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -915,7 +915,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=6 linhas=5",
-      "latencia_ms": 53.74,
+      "latencia_ms": 63.62,
       "colunas": [
         "id",
         "name",
@@ -939,7 +939,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 52.55,
+      "latencia_ms": 74.91,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -956,7 +956,7 @@
       "sucesso": false,
       "falha": "nao_suportado",
       "detalhe": "esperava 200: a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 76.84,
+      "latencia_ms": 86.11,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -973,7 +973,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=3 linhas=3",
-      "latencia_ms": 96.92,
+      "latencia_ms": 80.05,
       "colunas": [
         "metodo",
         "total_pagamentos",
@@ -994,7 +994,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "colunas=7 linhas=3",
-      "latencia_ms": 89.23,
+      "latencia_ms": 73.83,
       "colunas": [
         "id",
         "username",
@@ -1019,7 +1019,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 70.81,
+      "latencia_ms": 57.73,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -1036,7 +1036,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 77.25,
+      "latencia_ms": 64.72,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -1053,7 +1053,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 63.59,
+      "latencia_ms": 69.71,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -1070,7 +1070,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "a pergunta não pode ser respondida com o schema disponível",
-      "latencia_ms": 57.49,
+      "latencia_ms": 56.92,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -1087,7 +1087,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "fontes=3 citacao=sim",
-      "latencia_ms": 918.95,
+      "latencia_ms": 1021.4,
       "colunas": [],
       "linhas": 0,
       "fontes": 3,
@@ -1104,7 +1104,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "fontes=1 citacao=sim",
-      "latencia_ms": 850.06,
+      "latencia_ms": 1046.37,
       "colunas": [],
       "linhas": 0,
       "fontes": 1,
@@ -1121,7 +1121,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "fontes=3 citacao=sim",
-      "latencia_ms": 816.44,
+      "latencia_ms": 1197.65,
       "colunas": [],
       "linhas": 0,
       "fontes": 3,
@@ -1138,7 +1138,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "fontes=3 citacao=sim",
-      "latencia_ms": 1168.79,
+      "latencia_ms": 946.45,
       "colunas": [],
       "linhas": 0,
       "fontes": 3,
@@ -1155,7 +1155,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "fontes=2 citacao=sim",
-      "latencia_ms": 859.86,
+      "latencia_ms": 1066.19,
       "colunas": [],
       "linhas": 0,
       "fontes": 2,
@@ -1172,7 +1172,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "fontes=3 citacao=sim",
-      "latencia_ms": 1088.24,
+      "latencia_ms": 890.16,
       "colunas": [],
       "linhas": 0,
       "fontes": 3,
@@ -1189,7 +1189,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "guardrail sem fontes",
-      "latencia_ms": 1404.52,
+      "latencia_ms": 805.55,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -1206,7 +1206,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "guardrail sem fontes",
-      "latencia_ms": 1644.56,
+      "latencia_ms": 880.04,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -1223,7 +1223,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "guardrail sem fontes",
-      "latencia_ms": 1242.91,
+      "latencia_ms": 1184.95,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -1240,7 +1240,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "answer=70 caracteres",
-      "latencia_ms": 37.25,
+      "latencia_ms": 95.04,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -1257,7 +1257,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "answer=85 caracteres",
-      "latencia_ms": 38.7,
+      "latencia_ms": 115.46,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,
@@ -1274,7 +1274,7 @@
       "sucesso": true,
       "falha": null,
       "detalhe": "answer=118 caracteres",
-      "latencia_ms": 38.47,
+      "latencia_ms": 190.07,
       "colunas": [],
       "linhas": 0,
       "fontes": 0,

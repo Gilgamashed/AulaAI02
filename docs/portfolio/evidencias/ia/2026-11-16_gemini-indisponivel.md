@@ -29,7 +29,7 @@ relatório desse run foi descartado: apresentar resultados de mock com rótulo
 ## Conclusão
 
 - O baseline válido desta rodada é o de **mock**, publicado em
-  [`2026-11-16_2257_mock.md`](2026-11-16_2257_mock.md).
+  [`2026-11-16_2302_mock.md`](2026-11-16_2302_mock.md).
 - O baseline Gemini fica **pendente** até a cota diária renovar (ou até haver
   uma chave com limite maior). A spec `01` aceita explicitamente o mock como
   mínimo quando o Gemini não está disponível.

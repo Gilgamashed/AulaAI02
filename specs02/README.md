@@ -47,8 +47,8 @@ Taxa por categoria (mock): `contagem` 4/6 · `listagem` 3/6 · `agregacao` 6/9 �
 `fora_dominio` 4/4 · `rag_tecnico` 6/6 · `rag_fora_corpus` 3/3 · `assist` 3/3.
 
 Evidências:
-[relatório JSON](../docs/portfolio/evidencias/ia/2026-11-16_2257_mock.json) ·
-[resumo Markdown](../docs/portfolio/evidencias/ia/2026-11-16_2257_mock.md).
+[relatório JSON](../docs/portfolio/evidencias/ia/2026-11-16_2302_mock.json) ·
+[resumo Markdown](../docs/portfolio/evidencias/ia/2026-11-16_2302_mock.md).
 
 O baseline é a linha de base da spec `02`: as categorias `serie_temporal`,
 `jsonb_itens` e parte de `join` falham exatamente nos pontos descritos na spec
