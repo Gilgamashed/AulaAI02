@@ -5,6 +5,24 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.28.0] - 2026-11-16 — Fase 2: avaliação mensurável dos pilares de IA
+
+### Adicionado
+- **Golden set da fase 2:** `scripts/avaliacao_ia/golden_set.json` com **58 itens** em 11 categorias — as 10 obrigatórias da spec `01` mais 3 itens complementares de `assist`. Inclui 22 itens `ci_mock`, 4 recusas esperadas e 3 guardrails de RAG; as expectativas são estruturais (status, colunas, linhas, fontes e citação).
+- **Harness `scripts/avaliar_ia.py`:** avaliação ponta a ponta com biblioteca padrão, login admin, metadados de provedor/modelo/commit, taxonomia de falhas, p50/p95, tokens e relatórios JSON + Markdown em `docs/portfolio/evidencias/ia/`. Gate configurável por `--min-sucesso`, `--categorias`, `--max-questions`, `--delay` e `--dry-run`.
+- **Testes:** `tests/unit/test_avaliacao_ia.py` (37 testes, cliente HTTP falso) e `tests/integration/test_golden_set_ask_sql.py` (itens `ci_mock` via mock determinístico, após `seed_auth` + `seed_demo`).
+- **Baseline mock:** taxa geral **58,62%** (34/58) e gate (`consulta` + `rag_tecnico`) **50,00%** (24/48); falhas concentradas em `serie_temporal` (0/5), `jsonb_itens` (0/5) e `join` (2/6), exatamente os pontos da spec `02`.
+- **Nota de indisponibilidade do Gemini:** a chave atingiu a cota diária da free tier (HTTP 429 `RESOURCE_EXHAUSTED`, 20 requisições/dia); o baseline Gemini fica pendente e o mock é a evidência válida da rodada.
+
+### Alterado
+- **`specs02/01_fase2_spec_avaliacao-ia.md`:** documenta a categoria complementar `assist`, os tipos `rag_tecnico`/`assist`, `colunas_min` com alternativas e `linhas_min`.
+- **`specs02/README.md`:** incremento `01` marcado como `Concluído` e seção de baseline com taxas, evidências e a lacuna do Gemini.
+
+### Validação
+- **616 testes** verdes, cobertura **90,16%** (gate 85%), `ruff check .` e `mypy api services dashboard` verdes.
+- `docs/openapi.yaml` inalterado em **1.26.0**: nenhuma rota ou contrato HTTP mudou.
+- Nenhuma alteração no pipeline de IA além do necessário para medir.
+
 ## [1.27.0] - 2026-11-16 — Fase 2: governança SpecDD e specs de IA
 
 ### Adicionado

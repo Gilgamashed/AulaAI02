@@ -37,7 +37,7 @@ sinônimos caem no guardrail. O `/assist` resume logs, sem consultar dados.
 ### 3.1. Golden set versionado
 
 Criar `scripts/avaliacao_ia/golden_set.json` com, no mínimo, **46 itens**
-distribuídos nestas categorias:
+distribuídos nestas categorias (mais 3 itens complementares de `assist`):
 
 | Categoria | Mínimo | Exemplo de pergunta |
 |---|---|---|
@@ -51,6 +51,11 @@ distribuídos nestas categorias:
 | `fora_dominio` | 4 | "Qual o endereço de entrega do pedido 1?" |
 | `rag_tecnico` | 6 | "Como funciona o cache do catálogo?" |
 | `rag_fora_corpus` | 3 | "Qual a política de troca da loja?" |
+| `assist` (complementar) | 3 | "Resuma este log de erro" |
+
+A categoria `assist` é complementar: mede o terceiro pilar citado no objetivo,
+mas **não entra no gate** de `--min-sucesso`, que considera apenas `consulta`
+(texto-para-SQL) e `rag_tecnico`.
 
 Formato:
 
@@ -78,8 +83,14 @@ Formato:
 
 Regras:
 
-- `tipo_resultado` é `consulta`, `recusa_esperada` (SQL fora do domínio) ou
-  `guardrail_esperado` (RAG sem fonte).
+- `tipo_resultado` é `consulta`, `recusa_esperada`, `guardrail_esperado`,
+  `rag_tecnico` ou `assist`. Os dois últimos classificam os pilares que não
+  são SQL e não entram no gate de 90%.
+- `esperado.colunas_min` aceita uma string (coluna obrigatória) ou uma lista
+  de alternativas aceitáveis, porque o Gemini escolhe aliases. Itens
+  `ci_mock` usam o alias determinístico do mock.
+- `esperado.linhas_min` é opcional (padrão `0`) e detecta consulta `200`
+  semanticamente vazia.
 - Pelo menos **10** perguntas de `consulta` devem estar fora dos padrões do
   mock (`api/core/llm/mock_sql.py`), para que o baseline reflita uso real.
 - Pelo menos **20** itens levam a tag `ci_mock`; o restante pode ser medido
@@ -204,7 +215,8 @@ Evidências em `docs/portfolio/evidencias/ia/`:
 
 ## 7. Definition of Done
 
-- [ ] `scripts/avaliacao_ia/golden_set.json` com ≥ 46 itens e 10 categorias.
+- [ ] `scripts/avaliacao_ia/golden_set.json` com ≥ 46 itens e 10 categorias
+      obrigatórias, mais 3 itens complementares de `assist`.
 - [ ] `scripts/avaliar_ia.py` executa ponta a ponta e falha com código != 0
       quando a taxa fica abaixo de `--min-sucesso`.
 - [ ] Relatórios de baseline (mock e, se possível, Gemini) publicados em

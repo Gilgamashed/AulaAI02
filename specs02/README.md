@@ -22,11 +22,37 @@ origem da nova fase é [`docs/portfolio/preparacao`](../docs/portfolio/preparaca
 
 | # | Spec | Prioridade | Status |
 |---|---|---|---|
-| 01 | [Avaliação de IA](01_fase2_spec_avaliacao-ia.md) | P0 | Especificado |
+| 01 | [Avaliação de IA](01_fase2_spec_avaliacao-ia.md) | P0 | Concluído |
 | 02 | [Texto-para-SQL v2](02_fase2_spec_texto-para-sql-v2.md) | P0 | Especificado |
 
 Status possíveis: `Planejado` (só backlog), `Especificado` (spec escrita e
 aprovada), `Em andamento`, `Concluído`, `Descartado`.
+
+## Baseline de IA — 2026-11-16
+
+Golden set versão 1: **58 itens / 11 categorias**, 22 com `ci_mock`.
+Baseline válido em `LLM_PROVIDER=mock`; o baseline Gemini ficou pendente
+porque a chave atingiu a cota diária da free tier (HTTP 429), conforme
+[nota de indisponibilidade](../docs/portfolio/evidencias/ia/2026-11-16_gemini-indisponivel.md).
+
+| Métrica | Mock |
+|---|---:|
+| Taxa geral | 58,62% (34/58) |
+| Gate (`consulta` + `rag_tecnico`) | 50,00% (24/48) |
+| Latência p50 / p95 | 72 ms / 1.180 ms |
+| Falhas | 12 `nao_suportado`, 12 `resposta_inesperada` |
+
+Taxa por categoria (mock): `contagem` 4/6 · `listagem` 3/6 · `agregacao` 6/9 ·
+`serie_temporal` 0/5 · `join` 2/6 · `jsonb_itens` 0/5 · `ranking` 3/5 ·
+`fora_dominio` 4/4 · `rag_tecnico` 6/6 · `rag_fora_corpus` 3/3 · `assist` 3/3.
+
+Evidências:
+[relatório JSON](../docs/portfolio/evidencias/ia/2026-11-16_2257_mock.json) ·
+[resumo Markdown](../docs/portfolio/evidencias/ia/2026-11-16_2257_mock.md).
+
+O baseline é a linha de base da spec `02`: as categorias `serie_temporal`,
+`jsonb_itens` e parte de `join` falham exatamente nos pontos descritos na spec
+— validação por regex e mock sem padrões para datas/itens.
 
 ## Backlog priorizado
 
@@ -37,7 +63,7 @@ intenção: só vira trabalho quando ganha spec numerada.
 
 | Item | Por que importa | Incremento | Status |
 |---|---|---|---|
-| Avaliação mensurável dos três pilares de IA | Hoje a qualidade é percebida, não medida | 01 | Especificado |
+| Avaliação mensurável dos três pilares de IA | Hoje a qualidade é percebida, não medida | 01 | Concluído |
 | Texto-para-SQL com cobertura real de perguntas | Principal queixa de uso; validação atual gera falsos negativos | 02 | Especificado |
 | Demo pública com seed e credenciais fixas | Recrutador precisa abrir e testar sem instalar nada | — | Planejado |
 | README de recrutador (problema, arquitetura, trade-offs) | É a primeira coisa lida em uma triagem | — | Planejado |

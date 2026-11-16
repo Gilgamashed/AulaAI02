@@ -708,3 +708,18 @@ executada (registrar apenas usos reais durante o desenvolvimento).
   - **Sem antecipação:** RAG v2, deploy, observabilidade, hardening e tool calling ficaram no backlog P0/P1/P2, sem código nesta etapa.
 - **Resultado/Decisão:** criados `specs02/README.md`, `specs02/00_diretriz_incremental_specdd_fase2.md`, `specs02/_template_fase2_spec.md`, `specs02/01_fase2_spec_avaliacao-ia.md`, `specs02/02_fase2_spec_texto-para-sql-v2.md`, `docs/portfolio/evidencias/README.md` e `.gitkeep` das cinco subpastas; atualizados `AGENTS.md`, `specs/README.md`, `README.md` e `docs/CHANGELOG.md` (1.27.0).
 - **Validação:** links relativos dos documentos verificados (0 quebrados); nenhuma mudança de código de produto; baseline da fase 1 preservado (578 testes, cobertura 90,16%, `ruff`/`mypy` verdes); `docs/openapi.yaml` permanece 1.26.0.
+
+## [2026-11-16] Fase 2 — Golden set, harness de avaliação e baseline de IA
+
+- **Ferramenta:** opencode (DeepSeek V4.1 Flash).
+- **Contexto:** execução da spec `01_fase2_spec_avaliacao-ia.md` para transformar a percepção de qualidade dos pilares de IA em um número reproduzível, antes de qualquer correção na spec `02`.
+- **Prompt do usuário (resumo):** “avaliando a spec `specs02/01_fase2_spec_avaliacao-ia.md` vamos realizar suas tarefas e responsabilidades para que seu DoD seja realizado”; decisões: incluir a categoria complementar `assist`, rodar o baseline com `--min-sucesso 0` e executar mock + Gemini.
+- **Decisões de arquitetura e escopo:**
+  - **Golden set de 58 itens em 11 categorias:** as 10 obrigatórias da spec e 3 itens de `assist`; 22 itens `ci_mock`, 4 recusas e 3 guardrails. `colunas_min` aceita alternativas de alias e `linhas_min` detecta resposta 200 semanticamente vazia.
+  - **Harness independente do Django:** `scripts/avaliar_ia.py` usa apenas a biblioteca padrão e fala com a stack por HTTP; classifica `consulta`, `recusa_esperada`, `guardrail_esperado`, `rag_tecnico` e `assist`, com a taxonomia da spec.
+  - **Gate separado do baseline:** o baseline roda com `--min-sucesso 0`; o gate padrão de 0,8 continua valendo para a comparação pós-spec `02`.
+  - **`/assist` é informativo:** mede o terceiro pilar, mas não entra no gate de `consulta` + `rag_tecnico`.
+  - **RAG calibrado contra o índice real:** as 6 perguntas técnicas retornam fonte e as 3 de fora do corpus retornam guardrail; os itens `ci_mock` foram validados contra `ProvedorMockSql`.
+  - **Gemini bloqueado por cota:** a chave atingiu 429 `RESOURCE_EXHAUSTED` da free tier (20 requisições/dia). O run misto foi descartado para não rotular mock como Gemini; a indisponibilidade foi registrada em `docs/portfolio/evidencias/ia/2026-11-16_gemini-indisponivel.md`.
+- **Resultado/Decisão:** criados `scripts/avaliacao_ia/golden_set.json`, `scripts/avaliar_ia.py`, `tests/unit/test_avaliacao_ia.py` (37 testes) e `tests/integration/test_golden_set_ask_sql.py`; atualizados `specs02/01_fase2_spec_avaliacao-ia.md`, `specs02/README.md`, `docs/CHANGELOG.md` (1.28.0) e este `PROMPTS.md`. Baseline mock publicado em `docs/portfolio/evidencias/ia/`.
+- **Validação:** **616 testes** verdes, cobertura **90,16%**, `ruff check .` e `mypy api services dashboard` verdes; baseline mock com taxa geral **58,62%** e gate **50,00%**; falhas concentradas em `serie_temporal`, `jsonb_itens` e `join`; OpenAPI inalterado em **1.26.0**.
