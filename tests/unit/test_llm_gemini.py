@@ -70,7 +70,7 @@ class _ErroHttp(Exception):
 def _provedor(modelos: _Modelos, **kwargs) -> ProvedorGemini:
     return ProvedorGemini(
         api_key="chave-de-teste",
-        modelo="gemini-3.5-flash",
+        modelo=MODELO_PADRAO,
         timeout_segundos=2.0,
         cliente=_Cliente(modelos),
         **kwargs,
@@ -79,7 +79,7 @@ def _provedor(modelos: _Modelos, **kwargs) -> ProvedorGemini:
 
 def test_chave_ausente_falha_com_configuracao_invalida():
     with pytest.raises(erros.LlmConfiguracaoInvalida, match="GEMINI_API_KEY"):
-        ProvedorGemini(api_key="  ", modelo="gemini-3.5-flash")
+        ProvedorGemini(api_key="  ", modelo=MODELO_PADRAO)
 
 
 def test_mapeia_system_e_user_para_o_sdk():
@@ -96,14 +96,59 @@ def test_mapeia_system_e_user_para_o_sdk():
     )
 
     chamada = modelos.chamadas[0]
-    assert chamada["model"] == "gemini-3.5-flash"
+    assert chamada["model"] == MODELO_PADRAO
     assert chamada["config"]["system_instruction"] == "Você é objetivo."
     assert chamada["config"]["temperature"] == 0.2
     assert chamada["config"]["max_output_tokens"] == 128
-    assert chamada["config"]["thinking_config"] == {"thinking_budget": 0}
+    assert "thinking_config" not in chamada["config"]
     assert chamada["contents"] == [
         {"role": "user", "parts": [{"text": "Explique o log."}]}
     ]
+
+
+@pytest.mark.parametrize(
+    ("modelo", "orcamento"),
+    [(MODELO_PADRAO, 512), ("gemini-3.5-flash", 0)],
+)
+def test_thinking_budget_configurado_e_enviado(modelo: str, orcamento: int):
+    modelos = _Modelos()
+    provedor = ProvedorGemini(
+        api_key="chave-de-teste",
+        modelo=modelo,
+        cliente=_Cliente(modelos),
+        thinking_budget=orcamento,
+    )
+
+    provedor.completar(
+        [{"role": "user", "content": "oi"}],
+        temperature=0.0,
+        max_tokens=16,
+    )
+
+    assert modelos.chamadas[0]["config"]["thinking_config"] == {
+        "thinking_budget": orcamento
+    }
+
+
+def test_thinking_budget_zero_falha_no_flash_lite():
+    with pytest.raises(erros.LlmConfiguracaoInvalida, match="Flash-Lite"):
+        ProvedorGemini(
+            api_key="chave-de-teste",
+            modelo=MODELO_PADRAO,
+            cliente=_Cliente(_Modelos()),
+            thinking_budget=0,
+        )
+
+
+@pytest.mark.parametrize("orcamento", [-1, "abc"])
+def test_thinking_budget_invalido_falha_na_construcao(orcamento):
+    with pytest.raises(erros.LlmConfiguracaoInvalida, match="LLM_THINKING_BUDGET"):
+        ProvedorGemini(
+            api_key="chave-de-teste",
+            modelo=MODELO_PADRAO,
+            cliente=_Cliente(_Modelos()),
+            thinking_budget=orcamento,
+        )
 
 
 def test_converte_historico_assistant_para_model():
@@ -322,6 +367,7 @@ def test_fabrica_gemini_usa_modelo_padrao_quando_setting_ainda_e_mock(monkeypatc
         LLM_MODEL_SQL="mock-sql",
         LLM_MODEL_DOCS="mock-docs",
         LLM_TIMEOUT_SEGUNDOS=20.0,
+        LLM_THINKING_BUDGET=None,
         GEMINI_API_KEY="chave",
     )
 
@@ -329,8 +375,33 @@ def test_fabrica_gemini_usa_modelo_padrao_quando_setting_ainda_e_mock(monkeypatc
 
     assert capturado["modelo"] == MODELO_PADRAO
     assert capturado["api_key"] == "chave"
+    assert capturado["thinking_budget"] is None
     assert servico.modelo == MODELO_PADRAO
     assert servico._fallback_provedor is None
+
+
+def test_fabrica_repassa_thinking_budget_configurado(monkeypatch):
+    capturado: dict = {}
+
+    class ProvedorFake:
+        def __init__(self, **kwargs) -> None:
+            capturado.update(kwargs)
+
+        def completar(self, *args, **kwargs):  # pragma: no cover - não chamado
+            raise AssertionError
+
+    monkeypatch.setattr("core.llm.servico.ProvedorGemini", ProvedorFake)
+    cfg = SimpleNamespace(
+        LLM_PROVIDER="gemini",
+        GEMINI_API_KEY="chave",
+        LLM_MODEL="mock",
+        LLM_TIMEOUT_SEGUNDOS=20.0,
+        LLM_THINKING_BUDGET=512,
+    )
+
+    _montar(cfg, "assist")
+
+    assert capturado["thinking_budget"] == 512
 
 
 def test_fabrica_rejeita_provedor_desconhecido():
@@ -417,7 +488,7 @@ def test_fabrica_auto_com_falha_de_montagem_usa_mock(monkeypatch):
     cfg = SimpleNamespace(
         LLM_PROVIDER="auto",
         GEMINI_API_KEY="chave",
-        LLM_MODEL="gemini-3.5-flash",
+        LLM_MODEL=MODELO_PADRAO,
     )
 
     servico = _montar(cfg, "assist")

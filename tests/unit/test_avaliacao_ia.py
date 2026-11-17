@@ -460,6 +460,54 @@ def test_gravar_relatorios_gera_json_e_markdown(tmp_path):
 # =====================================================================
 # Execução completa com clientes falsos
 # =====================================================================
+class ClienteTokenExpirado(ClienteFalso):
+    """Simula expiração do JWT no item e no snapshot final de métricas."""
+
+    def __init__(self, resposta_ask_sql: avaliar_ia.Resposta) -> None:
+        super().__init__({})
+        self.resposta_ask_sql = resposta_ask_sql
+        self.logins = 0
+        self.chamadas_ask_sql = 0
+        self.chamadas_metricas = 0
+
+    def requisitar(self, metodo, caminho, *, corpo=None, headers=None):
+        if caminho == "/api/v1/auth/token/":
+            self.chamadas.append((metodo, caminho))
+            self.logins += 1
+            return _resposta(200, {"access": f"token-{self.logins}"})
+        if caminho == "/api/v1/llm/metrics/":
+            self.chamadas.append((metodo, caminho))
+            self.chamadas_metricas += 1
+            if self.chamadas_metricas == 2:
+                return _resposta(401, {"detail": "token inválido"})
+            return _resposta(
+                200,
+                {
+                    "provedor_configurado": "auto",
+                    "provedor_efetivo": "gemini",
+                    "modelos": {
+                        "assist": "gemini-3.5-flash-lite",
+                        "sql": "gemini-3.5-flash-lite",
+                        "docs": "gemini-3.5-flash-lite",
+                    },
+                    "total": {
+                        "chamadas": 1,
+                        "tokens_prompt": 3,
+                        "tokens_output": 2,
+                        "custo_usd": 0.0,
+                        "fallbacks": 0,
+                    },
+                },
+            )
+        if caminho == "/api/v1/ask_sql/":
+            self.chamadas.append((metodo, caminho))
+            self.chamadas_ask_sql += 1
+            if self.chamadas_ask_sql == 1:
+                return _resposta(401, {"detail": "token inválido"})
+            return self.resposta_ask_sql
+        return super().requisitar(metodo, caminho, corpo=corpo, headers=headers)
+
+
 def _cliente_execucao(status_ask_sql: int = 200) -> ClienteFalso:
     dados_ask_sql = {
         "columns": ["total_pedidos"],
@@ -506,6 +554,35 @@ def test_executar_retorna_0_quando_gate_e_atendido(tmp_path):
     assert codigo == 0
     assert list(tmp_path.glob("*.json"))
     assert list(tmp_path.glob("*.md"))
+
+
+def test_executar_renova_token_apos_401(tmp_path):
+    resposta = _resposta(
+        200,
+        {
+            "columns": ["total_pedidos"],
+            "row_count": 1,
+            "rows": [{"total_pedidos": 20}],
+            "meta": {"tokens_prompt": 3, "tokens_output": 2, "modelo": "gemini"},
+        },
+    )
+    cliente = ClienteTokenExpirado(resposta)
+
+    codigo = avaliar_ia.executar(
+        golden_set=GOLDEN,
+        saida=tmp_path,
+        categorias={"contagem"},
+        max_questions=1,
+        min_sucesso=0.0,
+        delay=0.0,
+        cliente=cliente,
+    )
+
+    assert codigo == 0
+    assert cliente.logins == 3
+    assert cliente.chamadas_ask_sql == 2
+    relatorio = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+    assert relatorio["metadados"]["metricas_llm"]["depois"]["disponivel"] is True
 
 
 def test_executar_retorna_1_quando_gate_nao_e_atendido(tmp_path):

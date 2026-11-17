@@ -202,11 +202,11 @@ def test_metrics_reflete_o_modelo_efetivo_do_gemini(client_admin, settings):
     assert resposta.data["provedor"] == "gemini"
     assert resposta.data["provedor_configurado"] == "gemini"
     assert resposta.data["provedor_efetivo"] == "gemini"
-    assert resposta.data["modelo"] == "gemini-3.5-flash"
+    assert resposta.data["modelo"] == "gemini-3.5-flash-lite"
     assert resposta.data["modelos"] == {
-        "assist": "gemini-3.5-flash",
-        "sql": "gemini-3.5-flash",
-        "docs": "gemini-3.5-flash",
+        "assist": "gemini-3.5-flash-lite",
+        "sql": "gemini-3.5-flash-lite",
+        "docs": "gemini-3.5-flash-lite",
     }
 
 
@@ -222,7 +222,7 @@ def test_metrics_auto_resolve_gemini_quando_ha_chave(client_admin, settings):
     assert resposta.status_code == 200
     assert resposta.data["provedor_configurado"] == "auto"
     assert resposta.data["provedor_efetivo"] == "gemini"
-    assert resposta.data["modelos"]["assist"] == "gemini-3.5-flash"
+    assert resposta.data["modelos"]["assist"] == "gemini-3.5-flash-lite"
 
 
 def test_metrics_auto_sem_chave_resolve_mock(client_admin, settings):

@@ -445,6 +445,7 @@ def _montar(cfg: Any, tarefa: str = TAREFA_ASSIST) -> LlmService:
                 api_key=str(getattr(cfg, "GEMINI_API_KEY", "")),
                 modelo=modelo,
                 timeout_segundos=timeout_segundos,
+                thinking_budget=getattr(cfg, "LLM_THINKING_BUDGET", None),
             )
         except LlmConfiguracaoInvalida as falha:
             if configurado != PROVIDER_AUTO:

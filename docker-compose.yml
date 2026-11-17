@@ -120,6 +120,8 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-mock}
+      # Vazio omite thinking_config: o Flash-Lite rejeita thinking_budget=0.
+      LLM_THINKING_BUDGET: ${LLM_THINKING_BUDGET:-}
       LLM_TIMEOUT_SEGUNDOS: ${LLM_TIMEOUT_SEGUNDOS:-30.0}
       LLM_MAX_TENTATIVAS: ${LLM_MAX_TENTATIVAS:-2}
       LLM_BACKOFF_BASE_SEGUNDOS: ${LLM_BACKOFF_BASE_SEGUNDOS:-1.0}
@@ -130,8 +132,8 @@ services:
       LLM_CB_MAX_TENTATIVAS_HALF_OPEN: ${LLM_CB_MAX_TENTATIVAS_HALF_OPEN:-2}
       LLM_LOG_LEVEL: ${LLM_LOG_LEVEL:-INFO}
       LLM_REDACAO_ATIVA: ${LLM_REDACAO_ATIVA:-true}
-      LLM_CUSTO_INPUT_POR_1M_TOKENS: ${LLM_CUSTO_INPUT_POR_1M_TOKENS:-5.00}
-      LLM_CUSTO_OUTPUT_POR_1M_TOKENS: ${LLM_CUSTO_OUTPUT_POR_1M_TOKENS:-15.00}
+      LLM_CUSTO_INPUT_POR_1M_TOKENS: ${LLM_CUSTO_INPUT_POR_1M_TOKENS:-0.30}
+      LLM_CUSTO_OUTPUT_POR_1M_TOKENS: ${LLM_CUSTO_OUTPUT_POR_1M_TOKENS:-2.50}
       # Aula 21 (texto-para-SQL): o provedor `sql` é o mock especializado; os
       # limites valem para toda consulta, independentemente do SQL gerado.
       LLM_MODEL_SQL: ${LLM_MODEL_SQL:-mock-sql}

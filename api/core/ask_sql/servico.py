@@ -100,7 +100,7 @@ def responder(
             # Tokens medidos pelo serviço: base para custo e observabilidade.
             "tokens_prompt": resposta.tokens_prompt,
             "tokens_output": resposta.tokens_output,
-            # Nome do modelo efetivo (ex.: "gemini-3.5-flash" ou "mock-sql").
+            # Nome do modelo efetivo (ex.: "gemini-3.5-flash-lite" ou "mock-sql").
             # O fallback do getattr evita quebrar com serviços de teste.
             "modelo": getattr(servico, "modelo", getattr(settings, "LLM_MODEL", "mock")),
         },

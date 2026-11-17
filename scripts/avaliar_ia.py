@@ -15,7 +15,9 @@ Decisões:
   exato — o modelo pode escolher aliases diferentes;
 - `recusa_esperada` e `guardrail_esperado` contam como comportamento correto;
 - o gate de saída considera apenas `consulta` (texto-para-SQL) e
-  `rag_tecnico`; `/assist` é informativo.
+  `rag_tecnico`; `/assist` é informativo;
+- o access token expira em 5 minutos; ao receber 401, o harness renova o
+  login e repete o item uma vez, sem imprimir token nem senha.
 
 Uso:
 
@@ -1216,6 +1218,14 @@ def executar(
 
     for numero, item in enumerate(itens, start=1):
         resultado = avaliar_item(cliente, token, item)
+        if resultado.status_http == 401:
+            try:
+                token = login(cliente, usuario, senha)
+            except ErroAuth:
+                pass
+            else:
+                print(f"  token renovado; repetindo {item['id']}")
+                resultado = avaliar_item(cliente, token, item)
         resultados.append(resultado)
         estado = "OK" if resultado.sucesso else f"FALHA ({resultado.falha})"
         print(
@@ -1226,7 +1236,15 @@ def executar(
             time.sleep(delay)
 
     finalizado = datetime.now(timezone.utc)
-    metricas_depois = resumir_metricas(obter_metricas(cliente, token))
+    metricas_depois = obter_metricas(cliente, token)
+    if not metricas_depois:
+        try:
+            token = login(cliente, usuario, senha)
+        except ErroAuth:
+            pass
+        else:
+            metricas_depois = obter_metricas(cliente, token)
+    metricas_depois = resumir_metricas(metricas_depois)
     resumo = agregar(
         resultados,
         min_sucesso=min_sucesso,

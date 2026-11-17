@@ -241,6 +241,16 @@ def _env_flag(nome: str, padrao: str) -> bool:
     }
 
 
+def _env_inteiro_opcional(nome: str) -> int | None:
+    """Lê um inteiro opcional; string vazia significa "não enviar".
+
+    Usado pelo adaptador Gemini: `thinking_budget=0` é rejeitado pelos
+    modelos Flash-Lite, então o padrão é omitir o campo em vez de enviar zero.
+    """
+    valor = os.environ.get(nome, "").strip()
+    return int(valor) if valor else None
+
+
 CACHE_ENABLED = _env_flag("CACHE_ENABLED", "True")
 
 # Tempos de vida (TTL, em segundos) — valores sugeridos pela spec da Aula 8:
@@ -541,6 +551,10 @@ PAGAMENTO_PERMITIR_SIMULACAO_FALHA = _env_flag(
 #   LLM_MODEL                -> modelo endereçado (assist).
 #   LLM_MODEL_SQL            -> modelo da tarefa de texto-para-SQL.
 #   LLM_MODEL_DOCS           -> modelo do assistente RAG.
+#   LLM_THINKING_BUDGET      -> orçamento de raciocínio do Gemini; vazio omite
+#                               o campo (padrão do Flash-Lite: `minimal`).
+#                               Use 0 apenas com modelos que aceitam desligar
+#                               o thinking, como o `gemini-3.5-flash`.
 #   LLM_TIMEOUT_SEGUNDOS     -> deadline da guarda genérica do LlmService
 #                               (20-30s no provedor real; 5s no mock).
 #   LLM_MAX_TENTATIVAS       -> execuções da chamada (padrão: 3). Em `auto`,
@@ -565,6 +579,7 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "mock")
 # `ProvedorLlm`); o nome aparece em `meta.modelo` para deixar claro que o SQL
 # não veio de um modelo externo.
 LLM_MODEL_SQL = os.environ.get("LLM_MODEL_SQL", "mock-sql")
+LLM_THINKING_BUDGET = _env_inteiro_opcional("LLM_THINKING_BUDGET")
 LLM_TIMEOUT_SEGUNDOS = float(os.environ.get("LLM_TIMEOUT_SEGUNDOS", "5.0"))
 LLM_MAX_TENTATIVAS = int(os.environ.get("LLM_MAX_TENTATIVAS", "3"))
 LLM_BACKOFF_BASE_SEGUNDOS = float(os.environ.get("LLM_BACKOFF_BASE_SEGUNDOS", "1.0"))

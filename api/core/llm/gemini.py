@@ -10,6 +10,8 @@ Decisões relevantes:
 - o import do SDK é tardio: uma instalação que roda só com `LLM_PROVIDER=mock`
   não precisa carregar o cliente HTTP do Google no startup;
 - o cliente é injetável para que a suíte não toque a rede;
+- `thinking_config` é opcional: os modelos Flash-Lite rejeitam
+  `thinking_budget=0` com HTTP 400 e já usam `minimal` por padrão;
 - erros do SDK são traduzidos para a taxonomia neutra de `core.llm.erros`, e a
   mensagem exposta nunca carrega a chave, o corpo da requisição ou a resposta
   bruta do provedor.
@@ -33,7 +35,7 @@ from .erros import (
 )
 from .portas import LlmResposta
 
-MODELO_PADRAO = "gemini-3.5-flash"
+MODELO_PADRAO = "gemini-3.5-flash-lite"
 
 # Motivos de `finish_reason` que significam bloqueio de segurança/conteúdo.
 # `MAX_TOKENS` não entra aqui: uma resposta truncada com texto continua útil;
@@ -73,6 +75,7 @@ class ProvedorGemini:
         api_key: str,
         modelo: str = MODELO_PADRAO,
         timeout_segundos: float = 20.0,
+        thinking_budget: int | None = None,
         cliente: Any | None = None,
     ) -> None:
         chave = (api_key or "").strip()
@@ -81,8 +84,28 @@ class ProvedorGemini:
                 "GEMINI_API_KEY não configurada: defina a chave no .env ou "
                 "use LLM_PROVIDER=mock."
             )
-        self._modelo = (modelo or MODELO_PADRAO).strip()
+        modelo_final = (modelo or MODELO_PADRAO).strip()
+        if thinking_budget is None:
+            orcamento = None
+        else:
+            try:
+                orcamento = int(thinking_budget)
+            except (TypeError, ValueError):
+                raise LlmConfiguracaoInvalida(
+                    "LLM_THINKING_BUDGET deve ser um inteiro >= 0 ou vazio."
+                ) from None
+            if orcamento < 0:
+                raise LlmConfiguracaoInvalida(
+                    "LLM_THINKING_BUDGET deve ser um inteiro >= 0 ou vazio."
+                )
+            if orcamento == 0 and "flash-lite" in modelo_final.lower():
+                raise LlmConfiguracaoInvalida(
+                    "LLM_THINKING_BUDGET=0 não é aceito pelo Flash-Lite; "
+                    "deixe vazio para usar o padrão do modelo."
+                )
+        self._modelo = modelo_final
         self._timeout_segundos = max(0.5, float(timeout_segundos))
+        self._thinking_budget = orcamento
         self._cliente = cliente or self._criar_cliente(chave)
 
     def _criar_cliente(self, api_key: str) -> Any:
@@ -113,11 +136,9 @@ class ProvedorGemini:
         config: dict[str, Any] = {
             "temperature": float(temperature),
             "max_output_tokens": int(max_tokens),
-            # Desliga o "thinking" dos modelos Flash: ele consumiria
-            # `max_output_tokens` antes de produzir texto (resposta vazia com
-            # orçamento curto) e elevaria a latência de uma chamada síncrona.
-            "thinking_config": {"thinking_budget": 0},
         }
+        if self._thinking_budget is not None:
+            config["thinking_config"] = {"thinking_budget": self._thinking_budget}
         if sistema:
             config["system_instruction"] = sistema
 
