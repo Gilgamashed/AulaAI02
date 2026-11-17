@@ -131,6 +131,34 @@ Confirme os valores vigentes na página oficial de preços do Google antes de
 usar a estimativa em uma apresentação. O projeto não faz cobrança nem controla
 cota: o limite real é o da conta Google.
 
+### Limite da free tier: 20 requisições por dia
+
+Observado em **2026-11-16** com a chave de demonstração do projeto: ao atingir
+**20 requisições de `generateContent` no dia**, a free tier do Google AI Studio
+respondeu **HTTP 429 `RESOURCE_EXHAUSTED`** na métrica
+`generate_content_free_tier_requests`, com `retry` de aproximadamente 9 horas.
+O limite é da **conta/projeto da chave**, não do SynapseShop, e pode mudar;
+confirme o valor vigente em
+[Gemini API rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+
+Consequências práticas:
+
+- **Testes e CI nunca usam Gemini.** O serviço `tests` fixa
+  `LLM_PROVIDER=mock` e o teste de integração injeta `ProvedorMockSql`; a cota
+  não afeta a suíte.
+- **Avaliação manual:** o golden set da fase 2 tem 58 itens. Em free tier, um
+  run completo exige mais de um dia; use
+  `python scripts/avaliar_ia.py --max-questions 20` e trate o resultado como
+  amostra do dia.
+- **Demonstração:** com a cota esgotada, `auto` cai para o mock. Force
+  `LLM_PROVIDER=mock` para não gastar as últimas requisições em ensaio.
+- **Relatório:** um run que caiu para o mock não deve ser rotulado como
+  Gemini; confira `provedor_efetivo`, `fallbacks` e `ultimo_motivo_fallback`
+  em `/api/v1/llm/metrics/`.
+
+Evidência desta observação:
+[`2026-11-16_gemini-indisponivel.md`](../portfolio/evidencias/ia/2026-11-16_gemini-indisponivel.md).
+
 ## Como testar
 
 ### PowerShell

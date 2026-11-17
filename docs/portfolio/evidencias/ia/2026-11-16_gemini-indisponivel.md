@@ -20,6 +20,12 @@ O provedor respondeu **HTTP 429 `RESOURCE_EXHAUSTED`**:
 > limit: 20, model: `gemini-3.6-flash` — Generate content requests per day limit
 > exceeded on Free Tier. Retry in ~9h.
 
+**Referência do limite:** free tier com **20 requisições de `generateContent`
+por dia**, por conta/projeto da chave. O valor pode mudar; consulte
+[Gemini API rate limits](https://ai.google.dev/gemini-api/docs/rate-limits). A
+observação acima é de **2026-11-16**. O nome de modelo citado pelo provedor na
+métrica (`gemini-3.6-flash`) pode variar em relação ao `LLM_MODEL` configurado.
+
 O limite é da **free tier da chave usada** (20 requisições por dia), não do
 código. As primeiras chamadas do run consumiram a cota restante e as demais
 caíram para o mock pelo fallback de `auto` (53 de 58 chamadas com fallback). O
@@ -42,8 +48,13 @@ Depois do reset da cota:
 
 ```bash
 LLM_PROVIDER=auto docker compose up -d --force-recreate api
-python scripts/avaliar_ia.py --modo gemini --min-sucesso 0 --delay 1.0
+python scripts/avaliar_ia.py --modo gemini --min-sucesso 0 --delay 1.0 --max-questions 20
 ```
+
+O golden set completo tem 58 itens; com 20 requisições/dia, uma execução
+completa exige mais de um dia. Cada run parcial é uma amostra e deve ser
+comparado com amostras equivalentes. O baseline de mock continua sendo a
+regressão diária e não consome cota.
 
 Se o objetivo for medir o provedor sem fallback mascarar falhas, use
 `LLM_PROVIDER=gemini` e registre `--modo gemini-estrito`.

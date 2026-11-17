@@ -5,6 +5,31 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.28.1] - 2026-11-16 — Limite de cota do Gemini documentado
+
+### Adicionado
+- **Seção canônica em `docs/aulas/25-ia-real-gemini.md`:** “Limite da free tier:
+  20 requisições por dia”, com a observação de 2026-11-16 (HTTP 429
+  `RESOURCE_EXHAUSTED`), link para a documentação oficial de rate limits e as
+  consequências práticas para testes, avaliação manual e demonstração.
+- **Nota de evidência ampliada:** `docs/portfolio/evidencias/ia/2026-11-16_gemini-indisponivel.md`
+  passa a registrar o limite exato, a data da observação e o comando de
+  repetição com `--max-questions 20`.
+
+### Alterado
+- **`README.md`, `.env.example` e `AGENTS.md`:** nota de cota e regra de que
+  testes/CI usam `mock` e a avaliação manual com Gemini se limita a 20 itens.
+- **`docs/apresentacao/roteiro-demo.md` e `guia_apresentação.md`:** plano B
+  explícito para HTTP 429 — parar ensaios e forçar `LLM_PROVIDER=mock`.
+- **`specs02/01_fase2_spec_avaliacao-ia.md` e `02_fase2_spec_texto-para-sql-v2.md`:**
+  baseline e medição Gemini com `--max-questions 20`; o mock permanece como
+  regressão diária.
+
+### Validação
+- Mudança apenas documental: nenhum código, teste ou contrato alterado.
+- Links relativos dos arquivos modificados verificados.
+- OpenAPI permanece em **1.26.0**.
+
 ## [1.28.0] - 2026-11-16 — Fase 2: avaliação mensurável dos pilares de IA
 
 ### Adicionado

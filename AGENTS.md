@@ -66,7 +66,10 @@ python scripts/lint-openapi.ps1       # valida docs/openapi.yaml (Spectral)
 - IA: `LLM_PROVIDER=auto` é o padrão — Gemini preferencial e mock como
   fallback apenas para indisponibilidade técnica; `gemini` é estrito e `mock`
   é determinístico. Testes/CI fixam `LLM_PROVIDER=mock`; a `GEMINI_API_KEY`
-  fica só no `.env` (nunca versione nem imprima a chave).
+  fica só no `.env` (nunca versione nem imprima a chave). A free tier do Gemini
+  tem limite observado de **20 requisições/dia**: a suíte nunca chama o
+  provedor e a avaliação manual usa `--max-questions 20`
+  (ver `docs/aulas/25-ia-real-gemini.md`).
 - CI/CD: a publicação no DockerHub usa os *repository secrets*
   `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`; nunca versione os valores.
 - Toda decisão relevante fica registrada: specs, `README.md`,

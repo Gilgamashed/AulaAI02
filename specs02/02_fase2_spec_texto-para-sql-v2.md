@@ -148,6 +148,10 @@ Evidências em `docs/portfolio/evidencias/ia/`:
   disponível);
 - comparação antes/depois com as mesmas categorias do baseline.
 
+A medição com Gemini deve respeitar o limite de **20 requisições/dia** da free
+tier (ver `docs/aulas/25-ia-real-gemini.md`): use `--max-questions 20` e
+compare amostras equivalentes. O mock é a regressão diária e não consome cota.
+
 ## 6. Testes exigidos
 
 - `tests/unit/test_ask_sql_validacao_ast.py`: pelo menos 30 casos

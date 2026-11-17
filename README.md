@@ -899,6 +899,12 @@ de SQL e o guardrail do RAG continuam os mesmos. O
 `modelos`, `fallbacks`, `ultimo_motivo_fallback` e `fallback_ativo`. Para forçar
 o modo determinístico na demo, use `LLM_PROVIDER=mock` e reinicie a API.
 
+**Cota da free tier:** a chave de demonstração tem limite observado de
+**20 requisições por dia** no Google AI Studio. Testes e CI usam `mock`; para
+avaliação manual com Gemini, use `--max-questions 20` no
+`scripts/avaliar_ia.py`. Detalhes e evidência em
+[docs/aulas/25-ia-real-gemini.md](docs/aulas/25-ia-real-gemini.md).
+
 ### Massa demo e smoke
 
 ```bash

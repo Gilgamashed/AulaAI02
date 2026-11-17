@@ -723,3 +723,17 @@ executada (registrar apenas usos reais durante o desenvolvimento).
   - **Gemini bloqueado por cota:** a chave atingiu 429 `RESOURCE_EXHAUSTED` da free tier (20 requisições/dia). O run misto foi descartado para não rotular mock como Gemini; a indisponibilidade foi registrada em `docs/portfolio/evidencias/ia/2026-11-16_gemini-indisponivel.md`.
 - **Resultado/Decisão:** criados `scripts/avaliacao_ia/golden_set.json`, `scripts/avaliar_ia.py`, `tests/unit/test_avaliacao_ia.py` (37 testes) e `tests/integration/test_golden_set_ask_sql.py`; atualizados `specs02/01_fase2_spec_avaliacao-ia.md`, `specs02/README.md`, `docs/CHANGELOG.md` (1.28.0) e este `PROMPTS.md`. Baseline mock publicado em `docs/portfolio/evidencias/ia/`.
 - **Validação:** **616 testes** verdes, cobertura **90,16%**, `ruff check .` e `mypy api services dashboard` verdes; baseline mock com taxa geral **58,62%** e gate **50,00%**; falhas concentradas em `serie_temporal`, `jsonb_itens` e `join`; OpenAPI inalterado em **1.26.0**.
+
+## [2026-11-16] Fase 2 — Limite de 20 requisições/dia do Gemini
+
+- **Ferramenta:** opencode (DeepSeek V4.1 Flash).
+- **Contexto:** após o baseline da spec `01`, a chave do Gemini atingiu HTTP 429 `RESOURCE_EXHAUSTED` na free tier. O limite precisa ficar documentado para não ser confundido com falha do pipeline e para não contaminar testes.
+- **Prompt do usuário (resumo):** “vamos colocar informação na documentação à respeito do limite de 20 requisições/dia do gemini para referencia futura e levar isso em consideração ao realizar testes”.
+- **Decisões de arquitetura e escopo:**
+  - **Referência canônica em `docs/aulas/25-ia-real-gemini.md`:** seção “Limite da free tier: 20 requisições por dia”, com a observação datada de 2026-11-16, a métrica `generate_content_free_tier_requests`, link oficial de rate limits e consequências práticas.
+  - **Testes/CI não usam Gemini:** o serviço `tests` fixa `LLM_PROVIDER=mock` e o teste de integração injeta `ProvedorMockSql`; a cota é irrelevante para a suíte.
+  - **Avaliação manual:** usar `python scripts/avaliar_ia.py --max-questions 20`; o golden set completo de 58 itens exige mais de um dia em free tier. O resultado parcial é amostra, não baseline completo.
+  - **Sem mudança de código:** por decisão do usuário, o harness não ganhou trava de cota nesta rodada; a orientação é documental e operacional.
+  - **Demonstração:** se a cota acabar, parar ensaios e forçar `LLM_PROVIDER=mock` para reservar as requisições restantes.
+- **Resultado/Decisão:** atualizados `docs/aulas/25-ia-real-gemini.md`, `README.md`, `.env.example`, `AGENTS.md`, `docs/apresentacao/roteiro-demo.md`, `docs/apresentacao/guia_apresentação.md`, `specs02/01_fase2_spec_avaliacao-ia.md`, `specs02/02_fase2_spec_texto-para-sql-v2.md`, `specs02/README.md`, `docs/portfolio/evidencias/ia/2026-11-16_gemini-indisponivel.md` e `docs/CHANGELOG.md` (1.28.1).
+- **Validação:** mudança apenas documental; links relativos verificados; nenhum código, teste ou contrato alterado; OpenAPI permanece em **1.26.0**.

@@ -166,6 +166,12 @@ O relatório deve declarar explicitamente qual provedor foi usado. Se o Gemini
 não estiver disponível, o baseline de mock é o mínimo aceitável para encerrar o
 incremento, com a lacuna registrada no relatório.
 
+A free tier do Gemini tem limite observado de **20 requisições/dia** (HTTP 429
+`RESOURCE_EXHAUSTED`, em 2026-11-16). Para respeitar a cota, execute o harness
+com `--max-questions 20`; o golden set completo de 58 itens exige mais de um
+dia e cada execução parcial é uma amostra, não o baseline completo. O mock
+continua sendo a execução de regressão e não consome cota.
+
 ### 3.4. Regressão em CI
 
 - `tests/unit/test_avaliacao_ia.py`: validação do golden set (campos, contagens

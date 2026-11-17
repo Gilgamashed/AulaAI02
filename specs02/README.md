@@ -32,7 +32,8 @@ aprovada), `Em andamento`, `Concluído`, `Descartado`.
 
 Golden set versão 1: **58 itens / 11 categorias**, 22 com `ci_mock`.
 Baseline válido em `LLM_PROVIDER=mock`; o baseline Gemini ficou pendente
-porque a chave atingiu a cota diária da free tier (HTTP 429), conforme
+porque a chave atingiu a cota diária de **20 requisições/dia** da free tier
+(HTTP 429), conforme
 [nota de indisponibilidade](../docs/portfolio/evidencias/ia/2026-11-16_gemini-indisponivel.md).
 
 | Métrica | Mock |

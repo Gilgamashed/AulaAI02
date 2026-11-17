@@ -232,6 +232,10 @@ segundos, conforme o `Retry-After`) e tente novamente.
 **Plano B:** se o Gemini estiver lento, o fallback pode assumir. Mostre
 normalmente e explique o modo `auto`.
 
+**Plano B (cota):** a free tier do Gemini permite **20 requisições/dia**
+(observado em 2026-11-16). Se o log trouxer HTTP 429, a cota acabou: pare os
+ensaios, force `LLM_PROVIDER=mock` e reserve as requisições para a demo.
+
 ---
 
 ### 3.6. Consulta em linguagem natural → SQL — 3 min

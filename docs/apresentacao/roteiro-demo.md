@@ -138,6 +138,11 @@ cota estourar, o mock da tarefa assume após esgotar retry/breaker. Para forçar
 o modo determinístico, use `LLM_PROVIDER=mock`; para diagnóstico estrito, use
 `LLM_PROVIDER=gemini`. Reinicie a API após a troca.
 
+**Plano B (cota):** a free tier do Gemini tem limite observado de **20
+requisições/dia**. Se `/llm/metrics/` mostrar `fallbacks` crescendo ou o log
+trouxer HTTP 429, a cota acabou: pare os ensaios, use `LLM_PROVIDER=mock` e
+guarde as requisições restantes para a demo.
+
 ### 6. Dashboards (3 min)
 
 1. Abra `http://localhost:8501`.
