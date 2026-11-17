@@ -232,9 +232,11 @@ segundos, conforme o `Retry-After`) e tente novamente.
 **Plano B:** se o Gemini estiver lento, o fallback pode assumir. Mostre
 normalmente e explique o modo `auto`.
 
-**Plano B (cota):** a free tier do Gemini permite **20 requisições/dia**
-(observado em 2026-11-16). Se o log trouxer HTTP 429, a cota acabou: pare os
-ensaios, force `LLM_PROVIDER=mock` e reserve as requisições para a demo.
+**Plano B (cota):** a cota é por modelo. No `gemini-3.5-flash-lite` são
+**15 RPM / 500 RPD** (informado para a chave em 2026-11-17); no
+`gemini-3.5-flash` foram **20 requisições/dia** (observado em 2026-11-16). Se o
+log trouxer HTTP 429, pare os ensaios, force `LLM_PROVIDER=mock` e reserve as
+requisições para a demo. Confira os limites vigentes no AI Studio.
 
 ---
 

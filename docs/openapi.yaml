@@ -1233,11 +1233,11 @@ paths:
                 provedor: auto
                 provedor_configurado: auto
                 provedor_efetivo: gemini
-                modelo: gemini-3.5-flash
+                modelo: gemini-3.5-flash-lite
                 modelos:
-                  assist: gemini-3.5-flash
-                  sql: gemini-3.5-flash
-                  docs: gemini-3.5-flash
+                  assist: gemini-3.5-flash-lite
+                  sql: gemini-3.5-flash-lite
+                  docs: gemini-3.5-flash-lite
                 fallbacks: 0
                 ultimo_motivo_fallback: ""
                 fallback_ativo: false

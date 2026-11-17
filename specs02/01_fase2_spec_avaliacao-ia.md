@@ -166,11 +166,15 @@ O relatório deve declarar explicitamente qual provedor foi usado. Se o Gemini
 não estiver disponível, o baseline de mock é o mínimo aceitável para encerrar o
 incremento, com a lacuna registrada no relatório.
 
-A free tier do Gemini tem limite observado de **20 requisições/dia** (HTTP 429
-`RESOURCE_EXHAUSTED`, em 2026-11-16). Para respeitar a cota, execute o harness
-com `--max-questions 20`; o golden set completo de 58 itens exige mais de um
-dia e cada execução parcial é uma amostra, não o baseline completo. O mock
-continua sendo a execução de regressão e não consome cota.
+A cota da free tier é por projeto e por modelo: **20 requisições/dia** no
+`gemini-3.5-flash` (HTTP 429 `RESOURCE_EXHAUSTED`, em 2026-11-16) e **15 RPM /
+500 RPD** no `gemini-3.5-flash-lite` (informado para a chave em 2026-11-17;
+confirmar no AI Studio). Com o Flash-Lite, execute o golden set completo (58
+itens) com `python scripts/avaliar_ia.py --delay 4` — o teto é 15 RPM e, com a
+latência real, o run fica em ~6–8 RPM. O mock continua sendo a execução de
+regressão e não consome cota. O baseline Gemini de 2026-11-17 mediu 60,34%
+geral e 52,08% no gate; os relatórios estão em
+`docs/portfolio/evidencias/ia/2026-11-17_1800_gemini.*`.
 
 ### 3.4. Regressão em CI
 

@@ -881,9 +881,10 @@ versione a chave):
 ```env
 LLM_PROVIDER=auto
 GEMINI_API_KEY=sua-chave-do-google-ai-studio
-LLM_MODEL=gemini-3.5-flash
-LLM_MODEL_SQL=gemini-3.5-flash
-LLM_MODEL_DOCS=gemini-3.5-flash
+LLM_MODEL=gemini-3.5-flash-lite
+LLM_MODEL_SQL=gemini-3.5-flash-lite
+LLM_MODEL_DOCS=gemini-3.5-flash-lite
+LLM_THINKING_BUDGET=
 LLM_TIMEOUT_SEGUNDOS=30.0
 LLM_MAX_TENTATIVAS=2
 ```
@@ -899,10 +900,18 @@ de SQL e o guardrail do RAG continuam os mesmos. O
 `modelos`, `fallbacks`, `ultimo_motivo_fallback` e `fallback_ativo`. Para forçar
 o modo determinístico na demo, use `LLM_PROVIDER=mock` e reinicie a API.
 
-**Cota da free tier:** a chave de demonstração tem limite observado de
-**20 requisições por dia** no Google AI Studio. Testes e CI usam `mock`; para
-avaliação manual com Gemini, use `--max-questions 20` no
-`scripts/avaliar_ia.py`. Detalhes e evidência em
+**Modelo e thinking:** o padrão do adaptador é `gemini-3.5-flash-lite` nos três
+pilares. Deixe `LLM_THINKING_BUDGET` vazio: o Flash-Lite rejeita
+`thinking_budget=0` com HTTP 400 e já usa `minimal` por padrão. Use `0` apenas
+com `gemini-3.5-flash`.
+
+**Cota da free tier:** por projeto e por modelo — **20 req/dia** observados no
+`gemini-3.5-flash` (2026-11-16) e **15 RPM / 500 RPD** informados para o
+`gemini-3.5-flash-lite` (2026-11-17). Testes e CI usam `mock`; para avaliação
+manual com Gemini, `python scripts/avaliar_ia.py --delay 4` roda os 58 itens em
+uma janela. Baseline de 2026-11-17: **60,34%** geral, **52,08%** no gate
+(`consulta` + `rag_tecnico`), com `rag_tecnico` e `/assist` em 100%. Detalhes,
+medições e evidência em
 [docs/aulas/25-ia-real-gemini.md](docs/aulas/25-ia-real-gemini.md).
 
 ### Massa demo e smoke

@@ -134,11 +134,11 @@ precisa cobrir perguntas ambíguas nem texto livre fora dos padrões — o alvo 
 
 | Métrica | Antes | Meta | Como medir |
 |---|---|---|---|
-| Sucesso em `consulta` (Gemini) | baseline da spec `01` | ≥ 90% | golden set |
+| Sucesso em `consulta` (Gemini) | 45,24% (19/42) em 2026-11-17 | ≥ 90% | golden set |
 | Sucesso em `consulta` (mock) | baseline da spec `01` | ≥ 80% | golden set |
 | Falsos negativos do validador | casos da seção 2 | 0 | testes de regressão |
 | Violações de segurança | 0 | 0 | testes + revisão do AST |
-| p95 de latência | baseline | ≤ +20% | relatório antes/depois |
+| p95 de latência | 6.211 ms (2026-11-17) | ≤ +20% | relatório antes/depois |
 | Reparos por pergunta | 0 | ≤ 1 (padrão) | `meta.reparos` |
 
 Evidências em `docs/portfolio/evidencias/ia/`:
@@ -148,9 +148,14 @@ Evidências em `docs/portfolio/evidencias/ia/`:
   disponível);
 - comparação antes/depois com as mesmas categorias do baseline.
 
-A medição com Gemini deve respeitar o limite de **20 requisições/dia** da free
-tier (ver `docs/aulas/25-ia-real-gemini.md`): use `--max-questions 20` e
-compare amostras equivalentes. O mock é a regressão diária e não consome cota.
+A medição com Gemini deve respeitar a cota da free tier, que é por projeto e
+por modelo (ver `docs/aulas/25-ia-real-gemini.md`): com o
+`gemini-3.5-flash-lite` (15 RPM / 500 RPD informados em 2026-11-17), use
+`--delay 4` e rode os 58 itens; no legado `gemini-3.5-flash` (20 req/dia
+observados), use amostras de 20 itens e compare equivalentes. O baseline Gemini
+de 2026-11-17 mediu 60,34% geral e 52,08% no gate
+(`docs/portfolio/evidencias/ia/2026-11-17_1800_gemini.*`). O mock é a regressão
+diária e não consome cota.
 
 ## 6. Testes exigidos
 

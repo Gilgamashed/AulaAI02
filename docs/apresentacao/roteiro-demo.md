@@ -116,9 +116,10 @@ expõe a URL interna. Verifique `docker compose ps` e os logs do container
    ```env
    LLM_PROVIDER=auto
    GEMINI_API_KEY=...
-   LLM_MODEL=gemini-3.5-flash
-   LLM_MODEL_SQL=gemini-3.5-flash
-   LLM_MODEL_DOCS=gemini-3.5-flash
+   LLM_MODEL=gemini-3.5-flash-lite
+   LLM_MODEL_SQL=gemini-3.5-flash-lite
+   LLM_MODEL_DOCS=gemini-3.5-flash-lite
+   LLM_THINKING_BUDGET=
    LLM_TIMEOUT_SEGUNDOS=30.0
    LLM_MAX_TENTATIVAS=2
    ```

@@ -56,9 +56,10 @@ No `.env` (gitignored):
 ```env
 LLM_PROVIDER=auto
 GEMINI_API_KEY=sua-chave-do-google-ai-studio
-LLM_MODEL=gemini-3.5-flash
-LLM_MODEL_SQL=gemini-3.5-flash
-LLM_MODEL_DOCS=gemini-3.5-flash
+LLM_MODEL=gemini-3.5-flash-lite
+LLM_MODEL_SQL=gemini-3.5-flash-lite
+LLM_MODEL_DOCS=gemini-3.5-flash-lite
+LLM_THINKING_BUDGET=
 LLM_TIMEOUT_SEGUNDOS=30.0
 LLM_MAX_TENTATIVAS=2
 LLM_BACKOFF_BASE_SEGUNDOS=0.5
@@ -77,7 +78,11 @@ Observações:
 
 - `LLM_MODEL*` pode continuar com os valores históricos `mock`,
   `mock-sql` e `mock-docs`: em `auto`/`gemini`, a fábrica troca esses
-  defaults por `gemini-3.5-flash`; no fallback, o rótulo volta a ser `mock*`.
+  defaults por `gemini-3.5-flash-lite`; no fallback, o rótulo volta a ser `mock*`.
+- `LLM_THINKING_BUDGET` vazio **omite** `thinking_config` — obrigatório no
+  Flash-Lite, que rejeita `thinking_budget=0` com HTTP 400. Preencha `0` apenas
+  se escolher `gemini-3.5-flash` e quiser desligar o raciocínio; valores
+  positivos (ex.: `512`) funcionam nos dois modelos.
 - `LLM_TIMEOUT_SEGUNDOS` de 20–30 s é mais realista para o provedor externo;
   o prompt de SQL é o maior dos três e foi o que exigiu 30 s na validação. O
   mock responde em milissegundos.
@@ -103,21 +108,39 @@ Não versione o `.env` e não cole a chave em issues, prints ou no `PROMPTS.md`.
 
 ## Modelos e custos
 
-O modelo sugerido é `gemini-3.5-flash`, escolhido por equilíbrio entre
-latência e custo para as três tarefas. Modelos maiores podem ser usados
-trocando `LLM_MODEL*`.
+O padrão do adaptador é `gemini-3.5-flash-lite` para os três pilares
+(`assist`, `sql` e `docs`). Ele é o modelo mais rápido e barato da família 3.5
+(1.048.576 tokens de entrada, 65.536 de saída) e foi adotado em 2026-11-17
+depois de medições com a chave do projeto: respostas curtas aquecidas em
+**3,5–4,1 s**, contra 504 `DEADLINE_EXCEEDED` em 30 s do `gemini-3.5-flash` no
+mesmo teste de controle.
 
 Os nomes de modelos mudam com o tempo: o `gemini-2.5-flash`, sugerido na
-primeira versão desta aula, foi aposentado para chaves novas durante a
-validação (HTTP 404). O default do adaptador passou a ser
-`gemini-3.5-flash`. Confirme os modelos disponíveis para a sua chave com
-`client.models.list()` e ajuste `LLM_MODEL*` se necessário.
+primeira versão desta aula, foi aposentado para chaves novas (HTTP 404), e o
+`gemini-3.5-flash` tornou-se instável na validação. Confirme os disponíveis
+para a sua chave com `client.models.list()` e ajuste `LLM_MODEL*` se
+necessário. A troca de modelo **e** o ajuste de thinking precisam ir juntos —
+sem ele, todo `/assist` real devolve 502.
 
-O adaptador envia `thinking_config.thinking_budget=0` aos modelos Flash. Sem
-isso, o orçamento de saída pode ser consumido por tokens de raciocínio e a
-resposta volta vazia (ou a chamada estoura o timeout) — o que foi observado
-na validação com orçamentos curtos. Desligar o "thinking" também mantém a
-latência previsível para uma API síncrona.
+### Thinking
+
+Até 2026-11-16 o adaptador enviava `thinking_config.thinking_budget=0` para
+evitar que tokens de raciocínio consumissem `max_output_tokens` no
+`gemini-3.5-flash`. O Flash-Lite **rejeita zero** com
+**400 `INVALID_ARGUMENT`** (erro terminal, sem fallback para o mock) e já vem
+com `thinking_level=minimal` por padrão. Por isso o campo agora é opcional:
+
+| `LLM_THINKING_BUDGET` | Payload enviado | Uso |
+| --- | --- | --- |
+| vazio (padrão) | nenhum `thinking_config` | Flash-Lite — recomendado |
+| `0` | `thinking_config.thinking_budget=0` | somente modelos que aceitam desligar thinking, ex.: `gemini-3.5-flash` |
+| `512` | `thinking_config.thinking_budget=512` | opção explícita com orçamento positivo |
+
+Valores negativos ou não inteiros falham na construção com
+`LlmConfiguracaoInvalida`. `temperature` continua sendo enviado: a API o aceita
+e o ignora nesta geração (assim como `top_p`/`top_k`). O SDK instalado é
+`google-genai 1.75.0` e **não conhece `thinking_level`** — usar esse parâmetro
+exigiria upgrade de SDK, fora deste incremento.
 
 Os custos por 1M de tokens são configuráveis e usados apenas para a estimativa
 em `/api/v1/llm/metrics/`:
@@ -127,37 +150,47 @@ LLM_CUSTO_INPUT_POR_1M_TOKENS=0.30
 LLM_CUSTO_OUTPUT_POR_1M_TOKENS=2.50
 ```
 
-Confirme os valores vigentes na página oficial de preços do Google antes de
-usar a estimativa em uma apresentação. O projeto não faz cobrança nem controla
-cota: o limite real é o da conta Google.
+Esses são os preços oficiais publicados para o Flash-Lite e os defaults do
+`docker-compose.yml`. Confirme os valores vigentes na página oficial de preços
+do Google antes de usar a estimativa em uma apresentação. O projeto não faz
+cobrança nem controla cota: o limite real é o da conta Google.
 
-### Limite da free tier: 20 requisições por dia
+### Cota da free tier (por projeto e por modelo)
 
-Observado em **2026-11-16** com a chave de demonstração do projeto: ao atingir
-**20 requisições de `generateContent` no dia**, a free tier do Google AI Studio
-respondeu **HTTP 429 `RESOURCE_EXHAUSTED`** na métrica
-`generate_content_free_tier_requests`, com `retry` de aproximadamente 9 horas.
-O limite é da **conta/projeto da chave**, não do SynapseShop, e pode mudar;
-confirme o valor vigente em
-[Gemini API rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+| Modelo | Limite observado/informado | Data | Origem |
+| --- | --- | --- | --- |
+| `gemini-3.5-flash` | 20 requisições/dia | 2026-11-16 | HTTP 429 `RESOURCE_EXHAUSTED` medido na chave do projeto |
+| `gemini-3.5-flash-lite` | 15 RPM / 500 RPD | 2026-11-17 | limite informado para a chave; confirmar no AI Studio |
+
+A cota é da **conta/projeto da chave** e é **por modelo**, e pode mudar;
+confirme os valores vigentes em
+[Gemini API rate limits](https://ai.google.dev/gemini-api/docs/rate-limits) e
+em `aistudio.google.com/rate-limit`. Não há endpoint público que devolva os
+limites da chave — os números acima são observações datadas, não garantia do
+provedor.
 
 Consequências práticas:
 
 - **Testes e CI nunca usam Gemini.** O serviço `tests` fixa
   `LLM_PROVIDER=mock` e o teste de integração injeta `ProvedorMockSql`; a cota
   não afeta a suíte.
-- **Avaliação manual:** o golden set da fase 2 tem 58 itens. Em free tier, um
-  run completo exige mais de um dia; use
-  `python scripts/avaliar_ia.py --max-questions 20` e trate o resultado como
-  amostra do dia.
+- **Avaliação manual:** com 500 RPD, o golden set inteiro (58 itens) cabe em
+  uma janela. Use `python scripts/avaliar_ia.py --delay 4` (teto de 15 RPM;
+  com a latência real, ~6–8 RPM). O baseline de 2026-11-17 mediu **60,34%**
+  geral e **52,08%** no gate (`consulta` + `rag_tecnico`); `rag_tecnico` e
+  `/assist` ficaram em 100%. Evidência:
+  [`2026-11-17_1800_gemini.md`](../portfolio/evidencias/ia/2026-11-17_1800_gemini.md).
 - **Demonstração:** com a cota esgotada, `auto` cai para o mock. Force
   `LLM_PROVIDER=mock` para não gastar as últimas requisições em ensaio.
 - **Relatório:** um run que caiu para o mock não deve ser rotulado como
   Gemini; confira `provedor_efetivo`, `fallbacks` e `ultimo_motivo_fallback`
   em `/api/v1/llm/metrics/`.
 
-Evidência desta observação:
-[`2026-11-16_gemini-indisponivel.md`](../portfolio/evidencias/ia/2026-11-16_gemini-indisponivel.md).
+Evidências:
+[`2026-11-16_gemini-indisponivel.md`](../portfolio/evidencias/ia/2026-11-16_gemini-indisponivel.md)
+(20/dia no Flash) e
+[`2026-11-17_gemini-3.5-flash-lite.md`](../portfolio/evidencias/ia/2026-11-17_gemini-3.5-flash-lite.md)
+(medições do Flash-Lite).
 
 ## Como testar
 
@@ -270,8 +303,12 @@ mock.
   estrito quando `GEMINI_API_KEY` está ausente/vazia ou foi rejeitada. Em
   `auto`, a chave ausente cai para o mock com warning. Confira o `.env`,
   reinicie a API e veja o log `core.llm` (a chave não aparece nele).
+- **HTTP 502 com `400 INVALID_ARGUMENT` no log:** quase sempre
+  `thinking_budget=0` enviado ao Flash-Lite. Deixe `LLM_THINKING_BUDGET` vazio
+  e reinicie a API. Erro 400 é terminal e **não** cai para o mock em `auto`.
 - **HTTP 429:** cota/rate limit da conta Google. Aguarde o `retry_after` ou
-  reduza a frequência; o breaker pode abrir temporariamente.
+  reduza a frequência; use `--delay 4` no harness e o breaker pode abrir
+  temporariamente.
 - **HTTP 502 “resposta inválida”:** conteúdo bloqueado por segurança ou
   resposta sem texto. Bloqueio de segurança não faz fallback; reformule o
   prompt e remova dados sensíveis dos logs.
@@ -281,14 +318,16 @@ mock.
 - **Fallback inesperado:** consulte `provedor_efetivo`,
   `ultimo_motivo_fallback` e `fallbacks` em `/api/v1/llm/metrics/`. Se o
   motivo for timeout, reduza `LLM_MAX_TENTATIVAS` ou aumente o timeout.
-- **Latência alta:** use `gemini-3.5-flash` e `LLM_TIMEOUT_SEGUNDOS=30.0`;
-  o prompt de SQL é o mais longo e pode estourar 20 s no primeiro uso. Em
+- **Latência alta:** o padrão `gemini-3.5-flash-lite` resolveu o 504 do
+  `gemini-3.5-flash` nas medições locais (3,5–4,1 s aquecidos). Mantenha
+  `LLM_TIMEOUT_SEGUNDOS=30.0` para o prompt de SQL, o mais longo dos três. Em
   `auto`, `LLM_MAX_TENTATIVAS=2` reduz a espera antes do mock. Acompanhe
   `/api/v1/llm/metrics/`.
 - **`ask_docs` com `sources: []`:** guardrail acionado — a pergunta não tem
   chunk acima de `min_score`. Reformule ou reindexe com `indexar_docs`.
 - **Modelo indisponível (404):** em `auto`, cai para o mock; em `gemini`,
-  confirme o nome em `LLM_MODEL*`. O default seguro é `gemini-3.5-flash`.
+  confirme o nome em `LLM_MODEL*`. O default seguro é
+  `gemini-3.5-flash-lite`.
 
 ## Limitações
 
@@ -314,4 +353,6 @@ mock.
 - `api/core/llm/erros.py` — taxonomia neutra;
 - `tests/unit/test_llm_gemini.py` — testes do adaptador e da fábrica;
 - `tests/unit/test_llm_fallback.py` — testes do fallback e da elegibilidade;
+- `docs/portfolio/evidencias/ia/2026-11-17_gemini-3.5-flash-lite.md` — medições
+  da troca de modelo;
 - `specs/spec_da_aula_25_gemini.md` — spec normativa.

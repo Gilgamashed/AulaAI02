@@ -5,6 +5,82 @@ Todas as alterações relevantes do projeto SynapseShop. O formato segue o
 é [SemVer](https://semver.org/lang/pt-BR/). O ficheiro foi criado na Aula 13 e
 codifica retroativamente o histórico das aulas anteriores.
 
+## [1.29.0] - 2026-11-17 — Gemini 3.5 Flash-Lite nos três pilares de IA
+
+### Resumo
+- **Modelo:** `gemini-3.5-flash-lite` passa a ser o padrão de `assist`, `sql` e
+  `docs`, substituindo o `gemini-3.5-flash` (instável: 504 em 30 s no teste de
+  controle).
+- **Thinking configurável:** nova env `LLM_THINKING_BUDGET`; vazio omite
+  `thinking_config` (necessário no Flash-Lite) e `0` fica disponível apenas
+  para modelos que aceitam desligar o raciocínio.
+- **Cota:** 15 RPM / 500 RPD informados para o Flash-Lite; os 20 req/dia de
+  2026-11-16 permanecem como histórico do `gemini-3.5-flash`. Harness passa a
+  rodar os 58 itens com `--delay 4`.
+- **Custo:** defaults de `LLM_CUSTO_*` no Compose corrigidos para US$ 0,30/1M
+  (entrada) e US$ 2,50/1M (saída).
+- **Avaliação:** baseline Gemini de **60,34%** geral e **52,08%** no gate
+  (`consulta` + `rag_tecnico`), com `rag_tecnico` e `/assist` em 100%.
+- **Validação:** 623 testes verdes (90,21% de cobertura), smoke 13/13 com os
+  três pilares em Gemini real e `fallbacks=0`.
+
+### Adicionado
+- `LLM_THINKING_BUDGET` em `api/config/settings.py` (via `_env_inteiro_opcional`),
+  `docker-compose.yml` e `.env.example`, com validação de valores negativos e
+  não inteiros em `api/core/llm/gemini.py`.
+- Testes unitários para orçamento `0`, `512`, inválido (`-1`, `"abc"`) e para o
+  repasse da env pela fábrica; asserções de integração atualizadas para o novo
+  modelo em `/api/v1/llm/metrics/`.
+- Evidência `docs/portfolio/evidencias/ia/2026-11-17_gemini-3.5-flash-lite.md`
+  com disponibilidade do modelo, tabela de medições, custos, cota datada,
+  resultado do smoke e baseline do golden set.
+
+### Alterado
+- `api/core/llm/gemini.py`: `MODELO_PADRAO = "gemini-3.5-flash-lite"` e
+  `thinking_config` enviado somente quando configurado. `temperature` continua
+  no payload (aceito e ignorado pelo modelo).
+- `api/core/llm/servico.py` e `api/core/ask_sql/servico.py`: fábrica repassa o
+  orçamento de thinking e comentários alinhados ao modelo atual.
+- Documentação canônica (`docs/aulas/25-ia-real-gemini.md`), `README.md`,
+  `AGENTS.md`, `PROMPTS.md`, guia/roteiro de apresentação, `specs02/` e
+  `docs/openapi.yaml` (exemplo de métricas; contrato segue em **1.26.0**).
+
+### Corrigido
+- **HTTP 400 com o Flash-Lite:** o `thinking_budget=0` fixo desde a Aula 25 era
+  rejeitado com `INVALID_ARGUMENT`; como erro 400 é terminal, o modo `auto`
+  não fazia fallback e devolvia 502. Agora o default omite o campo.
+- **Estimativa de custo divergente:** os defaults do Compose estavam em
+  5.00/15.00 USD por 1M tokens, enquanto `.env.example` e a tabela oficial
+  usam 0.30/2.50.
+- **Harness e JWT de 5 minutos:** o primeiro run do golden set levou 5min31s e
+  perdeu os 8 últimos itens com 401. O harness agora renova o login ao receber
+  401, repete o item uma vez e renova antes do snapshot final de métricas.
+
+### Validação
+- `docker compose run --rm tests`: **623 testes** aprovados, cobertura
+  **90,21%** (gate ≥ 85%).
+- `python -m ruff check .`, `python -m mypy api services dashboard` e Spectral
+  no OpenAPI: sem erros.
+- `docker compose up -d --build db api dashboard` + `python scripts/validar_compose.py`:
+  **5/5**; `python scripts/validar_mvp.py`: **13/13**, com `/assist/`,
+  `/ask_sql/` e `/ask_docs/` respondendo 200 via Gemini.
+- `/api/v1/llm/metrics/`: `provedor_efetivo=gemini`,
+  `modelos={assist,sql,docs}=gemini-3.5-flash-lite`, `fallbacks=0` e custos
+  `0.30/2.50`. Nenhuma chave foi impressa ou versionada.
+
+### Avaliação Gemini
+- Run completo de **58 itens** com `--delay 4` e `--min-sucesso 0`:
+  **60,34%** de taxa geral (35/58), **45,24%** em `consulta` (19/42) e
+  **52,08%** no gate `consulta` + `rag_tecnico` (25/48); `rag_tecnico` e
+  `/assist` ficaram em **100%**.
+- Latência p50/p95 de **2.252 ms / 6.211 ms**, **24.695 tokens** informados
+  pelas respostas e `fallbacks=0`.
+- Falhas concentradas em `jsonb_itens` (0/5), `join` (2/6), `agregacao` (4/9) e
+  `serie_temporal` (2/5) — os pontos que a spec `02` se propõe a corrigir.
+- Relatórios:
+  [JSON](portfolio/evidencias/ia/2026-11-17_1800_gemini.json) ·
+  [Markdown](portfolio/evidencias/ia/2026-11-17_1800_gemini.md).
+
 ## [1.28.1] - 2026-11-16 — Limite de cota do Gemini documentado
 
 ### Adicionado
